@@ -23,6 +23,24 @@ import yfinance as yf
 from flask import Flask, jsonify
 
 # ─────────────────────────────────────────────
+#  yfinance Session — ป้องกัน Yahoo บล็อก
+# ─────────────────────────────────────────────
+_YF_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/124.0.0.0 Safari/537.36"
+    ),
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.5",
+}
+
+def _make_yf_session() -> requests.Session:
+    s = requests.Session()
+    s.headers.update(_YF_HEADERS)
+    return s
+
+# ─────────────────────────────────────────────
 #  Logging
 # ─────────────────────────────────────────────
 logging.basicConfig(
@@ -109,7 +127,8 @@ def fetch_and_filter(tickers: list[str]) -> list[dict]:
                 group_by="ticker",
                 auto_adjust=True,
                 progress=False,
-                threads=True,
+                threads=False,
+                session=_make_yf_session(),
             )
         except Exception as e:
             log.warning(f"ดาวน์โหลด chunk {idx} ล้มเหลว: {e}")
