@@ -10,6 +10,7 @@
   HF_API_TOKEN         = Hugging Face API Token (จาก hf.co/settings/tokens)
 """
 
+import io
 import os
 import time
 import threading
@@ -65,8 +66,17 @@ app = Flask(__name__)
 def get_sp500_tickers() -> list[str]:
     """ดึงรายชื่อหุ้น S&P 500 ทั้งหมดจาก Wikipedia"""
     url = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/124.0.0.0 Safari/537.36"
+        )
+    }
     try:
-        tables = pd.read_html(url, attrs={"id": "constituents"})
+        resp = requests.get(url, headers=headers, timeout=15)
+        resp.raise_for_status()
+        tables = pd.read_html(io.StringIO(resp.text), attrs={"id": "constituents"})
         tickers = tables[0]["Symbol"].str.replace(".", "-", regex=False).tolist()
         log.info(f"โหลดรายชื่อหุ้นสำเร็จ: {len(tickers)} ตัว")
         return tickers

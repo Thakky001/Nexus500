@@ -1,7 +1,7 @@
 # 📖 คู่มือ S&P 500 Scanner Bot — ฉบับสมบูรณ์
 
 > **ระบบสแกนหุ้น S&P 500 อัตโนมัติ** • แจ้งเตือนผ่าน Telegram ทุกวัน  
-> ใช้งานฟรี 100% บน Render.com + Hugging Face + cron-job.org
+> ใช้งานฟรี 100% บน Render.com + Hugging Face + UptimeRobot
 
 ---
 
@@ -154,23 +154,23 @@ git push -u origin main
 
 ### 5.2 ตั้งค่า Build
 
-| Field | ค่าที่ต้องใส่ |
-|-------|------------|
-| **Name** | sp500-bot (หรือชื่ออื่น) |
-| **Runtime** | Python 3 |
+| Field             | ค่าที่ต้องใส่                     |
+| ----------------- | --------------------------------- |
+| **Name**          | sp500-bot (หรือชื่ออื่น)          |
+| **Runtime**       | Python 3                          |
 | **Build Command** | `pip install -r requirements.txt` |
-| **Start Command** | `gunicorn app:app` |
-| **Instance Type** | Free |
+| **Start Command** | `gunicorn app:app`                |
+| **Instance Type** | Free                              |
 
 ### 5.3 ใส่ Environment Variables
 
 กด **Environment** → **Add Environment Variable** แล้วใส่ทีละตัว:
 
-| Key | Value |
-|-----|-------|
-| `TELEGRAM_BOT_TOKEN` | Token จาก @BotFather |
-| `TELEGRAM_CHAT_ID` | Chat ID ของ Channel (เช่น `-1001234567890`) |
-| `HF_API_TOKEN` | Token จาก Hugging Face |
+| Key                  | Value                                       |
+| -------------------- | ------------------------------------------- |
+| `TELEGRAM_BOT_TOKEN` | Token จาก @BotFather                        |
+| `TELEGRAM_CHAT_ID`   | Chat ID ของ Channel (เช่น `-1001234567890`) |
+| `HF_API_TOKEN`       | Token จาก Hugging Face                      |
 
 > ⚠️ **สำคัญ:** อย่าใส่ค่าเหล่านี้ในโค้ดโดยตรง ใส่ใน Environment Variables เท่านั้น
 
@@ -186,11 +186,13 @@ git push -u origin main
 ### 5.5 ทดสอบ
 
 เปิดเบราว์เซอร์ไปที่:
+
 ```
 https://sp500-bot.onrender.com/trigger
 ```
 
 ถ้าได้ response แบบนี้ = สำเร็จ ✅
+
 ```json
 {
   "status": "accepted",
@@ -202,42 +204,34 @@ https://sp500-bot.onrender.com/trigger
 
 ---
 
-## Phase 6 — ตั้งเวลาอัตโนมัติด้วย cron-job.org
+## Phase 6 — Keep Alive & Monitor ด้วย UptimeRobot
 
-1. ไปที่ [https://cron-job.org](https://cron-job.org) → สมัครฟรี
-2. กด **CREATE CRONJOB**
+1. ไปที่ [https://uptimerobot.com](https://uptimerobot.com) → สมัครฟรี
+2. กด **+ Add New Monitor**
 3. ตั้งค่าดังนี้:
 
-| Field | ค่าที่ต้องใส่ |
-|-------|------------|
-| **Title** | SP500 Bot Daily Trigger |
-| **URL** | `https://sp500-bot.onrender.com/trigger` |
-| **Schedule** | Custom — ดูด้านล่าง |
+| Field                   | ค่าที่ต้องใส่                           |
+| ----------------------- | --------------------------------------- |
+| **Monitor Type**        | HTTP(s)                                 |
+| **Friendly Name**       | SP500 Bot Keep Alive                    |
+| **URL**                 | `https://sp500-bot.onrender.com/health` |
+| **Monitoring Interval** | Every 5 minutes                         |
 
-4. ตั้ง Schedule แบบ Custom:
+4. กด **Create Monitor** — เสร็จสิ้น! 🎉
 
-```
-# ทำงานทุกวันจันทร์–ศุกร์ เวลา 11:00 UTC (= 18:00 เวลาไทย)
-นาที: 0
-ชั่วโมง: 11
-วันในเดือน: *
-เดือน: *
-วันในสัปดาห์: 1-5
-```
+> 💡 **UptimeRobot จะ ping `/health` ทุก 5 นาที** เพื่อป้องกัน Render หยุดทำงานหลังไม่มีการใช้งาน 15 นาที (Free Tier) และแจ้งเตือนทาง Email ถ้า Bot ล่ม
 
-> 💡 **เวลาไทย (ICT) = UTC+7** ดังนั้น 18:00 ไทย = 11:00 UTC
-
-5. กด **CREATE** — เสร็จสิ้น! 🎉
+> ⚠️ **หมายเหตุ:** UptimeRobot ไม่รองรับการกำหนดเวลาเฉพาะ (เช่น จันทร์–ศุกร์ 18:00) — ระบบจะ ping ทุก 5 นาทีตลอดเวลา แต่โค้ดใน `app.py` มี logic ตรวจสอบวันและเวลาอยู่แล้ว จึงสแกนจริงเฉพาะช่วงเวลาที่กำหนด
 
 ---
 
 ## API Endpoints
 
-| Endpoint | ความหมาย |
-|----------|----------|
-| `GET /` | ตรวจสอบว่า Bot ยังทำงานอยู่ |
-| `GET /trigger` | เริ่มสแกนหุ้น (เรียกโดย cron-job) |
-| `GET /health` | Health check สำหรับ Render |
+| Endpoint       | ความหมาย                                      |
+| -------------- | --------------------------------------------- |
+| `GET /`        | ตรวจสอบว่า Bot ยังทำงานอยู่                   |
+| `GET /trigger` | เริ่มสแกนหุ้น (เรียกโดย UptimeRobot / manual) |
+| `GET /health`  | Health check สำหรับ Render                    |
 
 ---
 
@@ -271,6 +265,7 @@ https://sp500-bot.onrender.com/trigger
 ### ❓ เรียก `/trigger` แล้วได้ error เรื่อง Environment Variables
 
 ตรวจสอบว่าใส่ค่าครบทุกตัวบน Render:
+
 - `TELEGRAM_BOT_TOKEN`
 - `TELEGRAM_CHAT_ID`
 - `HF_API_TOKEN`
@@ -287,7 +282,7 @@ https://sp500-bot.onrender.com/trigger
 
 ### ❓ Render หยุดทำงานเองหลังไม่ได้ใช้งาน 15 นาที (Free Tier)
 
-ปกติของ Free Plan — cron-job.org จะ "ปลุก" เซิร์ฟเวอร์ทุกวัน ซึ่งใช้เวลาโหลดประมาณ 1–2 นาที แต่ระบบจะรอและทำงานต่อได้เอง
+ปกติของ Free Plan — UptimeRobot จะ ping `/health` ทุก 5 นาที เพื่อป้องกันไม่ให้ Render หลับ ระบบจึงพร้อมทำงานได้ตลอดเวลา
 
 ### ❓ FinBERT ตอบช้าหรือ Error ครั้งแรก
 
@@ -314,14 +309,14 @@ CHUNK_SIZE    = 50          # ลดเป็น 30 ถ้าโดน Rate Limi
 
 ## ต้นทุน (ทุกอย่างฟรี)
 
-| บริการ | แผน | ค่าใช้จ่าย |
-|--------|-----|----------|
-| GitHub | Free | $0 |
-| Render.com | Free (750 ชม./เดือน) | $0 |
-| Hugging Face | Free Inference API | $0 |
-| cron-job.org | Free | $0 |
-| Telegram | Free | $0 |
-| **รวม** | | **$0/เดือน** |
+| บริการ       | แผน                  | ค่าใช้จ่าย   |
+| ------------ | -------------------- | ------------ |
+| GitHub       | Free                 | $0           |
+| Render.com   | Free (750 ชม./เดือน) | $0           |
+| Hugging Face | Free Inference API   | $0           |
+| UptimeRobot  | Free (50 monitors)   | $0           |
+| Telegram     | Free                 | $0           |
+| **รวม**      |                      | **$0/เดือน** |
 
 ---
 
