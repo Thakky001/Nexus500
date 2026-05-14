@@ -1,8 +1,8 @@
 flask==3.0.3
 yfinance==0.2.40
-pandas==2.1.4
+pandas>=2.2.0
 pandas-ta-classic
 requests==2.32.3
 lxml==5.2.2
-numpy==1.26.4
+numpy>=2.0.0
 gunicorn==21.2.0
