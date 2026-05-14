@@ -23,24 +23,6 @@ import yfinance as yf
 from flask import Flask, jsonify
 
 # ─────────────────────────────────────────────
-#  yfinance Session — ป้องกัน Yahoo บล็อก
-# ─────────────────────────────────────────────
-_YF_HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/124.0.0.0 Safari/537.36"
-    ),
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-    "Accept-Language": "en-US,en;q=0.5",
-}
-
-def _make_yf_session() -> requests.Session:
-    s = requests.Session()
-    s.headers.update(_YF_HEADERS)
-    return s
-
-# ─────────────────────────────────────────────
 #  Logging
 # ─────────────────────────────────────────────
 logging.basicConfig(
@@ -128,7 +110,6 @@ def fetch_and_filter(tickers: list[str]) -> list[dict]:
                 auto_adjust=True,
                 progress=False,
                 threads=False,
-                session=_make_yf_session(),
             )
         except Exception as e:
             log.warning(f"ดาวน์โหลด chunk {idx} ล้มเหลว: {e}")
@@ -137,13 +118,21 @@ def fetch_and_filter(tickers: list[str]) -> list[dict]:
 
         for ticker in chunk:
             try:
-                # กรณีโหลดหุ้นเดียว pandas จะ flatten column
+                # yfinance v1.x: multi-ticker → columns are (field, ticker)
+                # single ticker → columns are flat (Close, Volume, ...)
                 if len(chunk) == 1:
                     df = raw.copy()
                 else:
-                    if ticker not in raw.columns.get_level_values(0):
+                    if not hasattr(raw.columns, "levels"):
                         continue
-                    df = raw[ticker].copy()
+                    lvl0 = raw.columns.get_level_values(0).unique().tolist()
+                    lvl1 = raw.columns.get_level_values(1).unique().tolist()
+                    if ticker in lvl1:
+                        df = raw.xs(ticker, axis=1, level=1).copy()
+                    elif ticker in lvl0:
+                        df = raw[ticker].copy()
+                    else:
+                        continue
 
                 df.dropna(subset=["Close", "Volume"], inplace=True)
                 if len(df) < 210:          # ต้องการข้อมูลพอคำนวณ EMA200

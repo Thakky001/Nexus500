@@ -1,7 +1,7 @@
 # 📖 คู่มือ S&P 500 Scanner Bot — ฉบับสมบูรณ์
 
 > **ระบบสแกนหุ้น S&P 500 อัตโนมัติ** • แจ้งเตือนผ่าน Telegram ทุกวัน  
-> ใช้งานฟรี 100% บน Render.com + Hugging Face + UptimeRobot
+> ใช้งานฟรี 100% บน Render.com + Hugging Face + cron-job.org
 
 ---
 
@@ -204,34 +204,42 @@ https://sp500-bot.onrender.com/trigger
 
 ---
 
-## Phase 6 — Keep Alive & Monitor ด้วย UptimeRobot
+## Phase 6 — ตั้งเวลาอัตโนมัติด้วย cron-job.org
 
-1. ไปที่ [https://uptimerobot.com](https://uptimerobot.com) → สมัครฟรี
-2. กด **+ Add New Monitor**
+1. ไปที่ [https://cron-job.org](https://cron-job.org) → สมัครฟรี
+2. กด **CREATE CRONJOB**
 3. ตั้งค่าดังนี้:
 
-| Field                   | ค่าที่ต้องใส่                           |
-| ----------------------- | --------------------------------------- |
-| **Monitor Type**        | HTTP(s)                                 |
-| **Friendly Name**       | SP500 Bot Keep Alive                    |
-| **URL**                 | `https://sp500-bot.onrender.com/health` |
-| **Monitoring Interval** | Every 5 minutes                         |
+| Field        | ค่าที่ต้องใส่                            |
+| ------------ | ---------------------------------------- |
+| **Title**    | SP500 Bot Daily Trigger                  |
+| **URL**      | `https://sp500-bot.onrender.com/trigger` |
+| **Schedule** | Custom — ดูด้านล่าง                      |
 
-4. กด **Create Monitor** — เสร็จสิ้น! 🎉
+4. ตั้ง Schedule แบบ Custom:
 
-> 💡 **UptimeRobot จะ ping `/health` ทุก 5 นาที** เพื่อป้องกัน Render หยุดทำงานหลังไม่มีการใช้งาน 15 นาที (Free Tier) และแจ้งเตือนทาง Email ถ้า Bot ล่ม
+```
+# ทำงานทุกวันจันทร์–ศุกร์ เวลา 11:00 UTC (= 18:00 เวลาไทย)
+นาที: 0
+ชั่วโมง: 11
+วันในเดือน: *
+เดือน: *
+วันในสัปดาห์: 1-5
+```
 
-> ⚠️ **หมายเหตุ:** UptimeRobot ไม่รองรับการกำหนดเวลาเฉพาะ (เช่น จันทร์–ศุกร์ 18:00) — ระบบจะ ping ทุก 5 นาทีตลอดเวลา แต่โค้ดใน `app.py` มี logic ตรวจสอบวันและเวลาอยู่แล้ว จึงสแกนจริงเฉพาะช่วงเวลาที่กำหนด
+> 💡 **เวลาไทย (ICT) = UTC+7** ดังนั้น 18:00 ไทย = 11:00 UTC
+
+5. กด **CREATE** — เสร็จสิ้น! 🎉
 
 ---
 
 ## API Endpoints
 
-| Endpoint       | ความหมาย                                      |
-| -------------- | --------------------------------------------- |
-| `GET /`        | ตรวจสอบว่า Bot ยังทำงานอยู่                   |
-| `GET /trigger` | เริ่มสแกนหุ้น (เรียกโดย UptimeRobot / manual) |
-| `GET /health`  | Health check สำหรับ Render                    |
+| Endpoint       | ความหมาย                          |
+| -------------- | --------------------------------- |
+| `GET /`        | ตรวจสอบว่า Bot ยังทำงานอยู่       |
+| `GET /trigger` | เริ่มสแกนหุ้น (เรียกโดย cron-job) |
+| `GET /health`  | Health check สำหรับ Render        |
 
 ---
 
@@ -282,7 +290,7 @@ https://sp500-bot.onrender.com/trigger
 
 ### ❓ Render หยุดทำงานเองหลังไม่ได้ใช้งาน 15 นาที (Free Tier)
 
-ปกติของ Free Plan — UptimeRobot จะ ping `/health` ทุก 5 นาที เพื่อป้องกันไม่ให้ Render หลับ ระบบจึงพร้อมทำงานได้ตลอดเวลา
+ปกติของ Free Plan — cron-job.org จะ "ปลุก" เซิร์ฟเวอร์ทุกวัน ซึ่งใช้เวลาโหลดประมาณ 1–2 นาที แต่ระบบจะรอและทำงานต่อได้เอง
 
 ### ❓ FinBERT ตอบช้าหรือ Error ครั้งแรก
 
@@ -314,7 +322,7 @@ CHUNK_SIZE    = 50          # ลดเป็น 30 ถ้าโดน Rate Limi
 | GitHub       | Free                 | $0           |
 | Render.com   | Free (750 ชม./เดือน) | $0           |
 | Hugging Face | Free Inference API   | $0           |
-| UptimeRobot  | Free (50 monitors)   | $0           |
+| cron-job.org | Free                 | $0           |
 | Telegram     | Free                 | $0           |
 | **รวม**      |                      | **$0/เดือน** |
 

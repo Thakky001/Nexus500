@@ -1,5 +1,5 @@
 flask==3.0.3
-yfinance==0.2.40
+yfinance>=1.0.0
 pandas>=2.2.0
 pandas-ta-classic
 requests==2.32.3
