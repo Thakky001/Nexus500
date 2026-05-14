@@ -41,7 +41,7 @@ HF_API_TOKEN       = os.environ.get("HF_API_TOKEN", "")
 
 # FinBERT model บน Hugging Face
 HF_MODEL_URL = (
-    "https://api-inference.huggingface.co/models/ProsusAI/finbert"
+    "https://router.huggingface.co/hf-inference/models/ProsusAI/finbert"
 )
 
 # พารามิเตอร์คัดกรอง
