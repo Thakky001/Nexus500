@@ -126,6 +126,10 @@ def get_gsheet():
         # ใช้ sheet ชื่อ "ScanHistory" ถ้ายังไม่มีให้สร้างใหม่
         try:
             ws = sh.worksheet("ScanHistory")
+            # ขยาย columns ถ้า Sheet มีน้อยกว่าที่ต้องการ
+            if ws.col_count < len(SHEET_HEADERS):
+                ws.resize(rows=ws.row_count, cols=len(SHEET_HEADERS))
+                log.info(f"ขยาย Sheet เป็น {len(SHEET_HEADERS)} columns")
             # ตรวจสอบว่า header ครบหรือยัง ถ้าไม่ครบให้เพิ่มอัตโนมัติ
             existing_headers = ws.row_values(1)
             for col_name in SHEET_HEADERS:
