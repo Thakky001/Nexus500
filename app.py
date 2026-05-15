@@ -105,6 +105,7 @@ SHEET_HEADERS = [
     "composite",
     "entry_current", "entry_ema50", "entry_ema200",
     "headlines",
+    "current_price", "change_pct",
 ]
 
 def get_gsheet():
@@ -125,6 +126,14 @@ def get_gsheet():
         # ใช้ sheet ชื่อ "ScanHistory" ถ้ายังไม่มีให้สร้างใหม่
         try:
             ws = sh.worksheet("ScanHistory")
+            # ตรวจสอบว่า header ครบหรือยัง ถ้าไม่ครบให้เพิ่มอัตโนมัติ
+            existing_headers = ws.row_values(1)
+            for col_name in SHEET_HEADERS:
+                if col_name not in existing_headers:
+                    next_col = len(existing_headers) + 1
+                    ws.update_cell(1, next_col, col_name)
+                    existing_headers.append(col_name)
+                    log.info(f"เพิ่ม header '{col_name}' ที่คอลัมน์ {next_col}")
         except gspread.exceptions.WorksheetNotFound:
             ws = sh.add_worksheet(title="ScanHistory", rows=5000, cols=len(SHEET_HEADERS))
             ws.append_row(SHEET_HEADERS)
@@ -170,6 +179,10 @@ def save_to_sheet(results: list, scan_date: str):
             stock.get("entry_ema50", ""),
             stock.get("entry_ema200", ""),
             " | ".join(headlines),
+            # current_price: ดึงราคาปัจจุบันจาก Google Finance (column B = ticker)
+            '=IFERROR(GOOGLEFINANCE(INDIRECT("B"&ROW()),"price"),"")',
+            # change_pct: % เปลี่ยนแปลงจากราคาตอนสแกน (column D = price, W = current_price)
+            '=IFERROR((INDIRECT("W"&ROW())-INDIRECT("D"&ROW()))/INDIRECT("D"&ROW())*100,"")',
         ])
 
     try:
@@ -948,6 +961,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
           <th class="hide-mobile">ห่าง 52W High</th>
           <th class="hide-mobile">EMA50 Entry</th>
           <th class="hide-mobile">EMA200 Entry</th>
+          <th>ราคาปัจจุบัน</th>
+          <th>เปลี่ยนแปลง</th>
           <th>ข่าว</th>
         </tr>
       </thead>
@@ -1010,7 +1025,7 @@ let currentData = [...RAW];
 function renderTable(data) {
   const tbody = document.getElementById('table-body');
   if (!data.length) {
-    tbody.innerHTML = `<tr><td colspan="14">
+    tbody.innerHTML = `<tr><td colspan="16">
       <div class="empty">
         <div class="icon">📭</div>
         <p>ไม่พบข้อมูลที่ตรงกับเกณฑ์</p>
@@ -1025,7 +1040,7 @@ function renderTable(data) {
   data.forEach((r, i) => {
     // Date separator
     if (r.date !== lastDate) {
-      html += `<tr class="date-sep"><td colspan="14">📅  ${r.date}</td></tr>`;
+      html += `<tr class="date-sep"><td colspan="16">📅  ${r.date}</td></tr>`;
       lastDate = r.date;
     }
 
@@ -1041,6 +1056,20 @@ function renderTable(data) {
     const headlines = (r.headlines || '').split(' | ');
     const newsPreview = headlines[0] || '—';
     const newsFull = headlines.map((h,i) => `${i+1}. ${h}`).join('<br>');
+
+    // ── ราคาปัจจุบัน + % เปลี่ยนแปลง ──────────────────────────────────────
+    const curPrice  = parseFloat(r.current_price);
+    const changePct = parseFloat(r.change_pct);
+    const curPriceStr = isNaN(curPrice)
+      ? '<span style="color:var(--muted)">—</span>'
+      : `$${curPrice.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}`;
+    let changePctStr = '<span style="color:var(--muted)">—</span>';
+    if (!isNaN(changePct)) {
+      const sign  = changePct >= 0 ? '+' : '';
+      const color = changePct >= 0 ? 'var(--green)' : 'var(--red)';
+      const arrow = changePct >= 0 ? '▲' : '▼';
+      changePctStr = `<span style="font-family:var(--font-mono);color:${color};font-weight:700">${arrow} ${sign}${changePct.toFixed(2)}%</span>`;
+    }
 
     html += `<tr style="animation-delay:${i*20}ms">
       <td style="font-family:var(--font-mono);font-size:0.75rem;color:var(--subtext)">${r.date}</td>
@@ -1063,6 +1092,8 @@ function renderTable(data) {
       <td class="hide-mobile" style="font-family:var(--font-mono);color:var(--subtext)">-${r.pct_from_52w}%</td>
       <td class="hide-mobile" style="font-family:var(--font-mono);color:var(--green)">$${parseFloat(r.entry_ema50||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
       <td class="hide-mobile" style="font-family:var(--font-mono);color:var(--subtext)">$${parseFloat(r.entry_ema200||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
+      <td style="font-family:var(--font-mono)">${curPriceStr}</td>
+      <td>${changePctStr}</td>
       <td class="news-cell">
         <div class="news-preview">${newsPreview}</div>
         <div class="news-tooltip">${newsFull}</div>
