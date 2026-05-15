@@ -1,13 +1,10 @@
 """
 ╔══════════════════════════════════════════════════════════╗
-║      S&P 500 Stock Scanner Bot  •  app.py  [v2 STRICT]  ║
+║   S&P 500 Stock Scanner Bot  •  app.py  [LONG-TERM]      ║
 ║  Flask + yfinance + pandas-ta + FinBERT + Telegram       ║
 ╠══════════════════════════════════════════════════════════╣
-║  ระบบคัดกรอง 4 ชั้น + Scoring 0–10 คะแนน               ║
-║  ชั้น 1 : Trend Alignment  (EMA20>50>200 + Slope + ADX) ║
-║  ชั้น 2 : Momentum         (RSI + MACD Histogram)        ║
-║  ชั้น 3 : Volume Quality   (Avg Vol + Volume Surge)      ║
-║  ชั้น 4 : Price Structure  (52W High + Short Momentum)   ║
+║  ระบบคัดกรอง 4 ชั้น สำหรับการลงทุนระยะยาว / DCA สะสมหุ้น      ║
+║  เน้นหุ้นพื้นฐานดีที่ยืนบนแนวโน้มขาขึ้น และรอรับเมื่อราคาย่อตัว      ║
 ╚══════════════════════════════════════════════════════════╝
 
 Environment Variables บน Render:
@@ -48,26 +45,26 @@ HF_API_TOKEN       = os.environ.get("HF_API_TOKEN", "")
 HF_MODEL_URL = "https://router.huggingface.co/hf-inference/models/ProsusAI/finbert"
 
 # ══════════════════════════════════════════════
-#  ⚙️  เกณฑ์คัดกรอง — ปรับได้ที่นี่ที่เดียว
+#  ⚙️  เกณฑ์คัดกรอง (ปรับสำหรับลงทุนระยะยาว)
 # ══════════════════════════════════════════════
 
-# ── ชั้น 1: Trend Alignment (บังคับทุกข้อ) ──
-MIN_ADX           = 25      # ADX ขั้นต่ำ: เทรนด์ต้องแรงพอ
-EMA_SLOPE_DAYS    = 10      # วัด Slope EMA50 ย้อนหลังกี่วัน
-MIN_EMA50_SLOPE   = 0.1     # EMA50 ต้องขึ้นอย่างน้อย 0.1% ใน N วัน
+# ── ชั้น 1: Trend Alignment (บังคับ) ──
+MIN_ADX           = 20      # เทรนด์ระยะยาว ไม่จำเป็นต้องพุ่งแรงตลอดเวลา
+EMA_SLOPE_DAYS    = 20      # ดูภาพกว้างขึ้น (20 วัน)
+MIN_EMA50_SLOPE   = 0.0     # แค่ความชันไม่ติดลบก็พอ (เป็นขาขึ้นหรือทรงตัว)
 
-# ── ชั้น 2: Momentum (บังคับทุกข้อ) ─────────
-RSI_LOW           = 50      # RSI ขั้นต่ำ (เข้มขึ้นจาก 45 → 50)
-RSI_HIGH          = 68      # RSI สูงสุด (กัน Overbought)
-MIN_MACD_HIST     = 0.0     # MACD Histogram ต้องเป็นบวก (> 0)
+# ── ชั้น 2: Momentum (บังคับ) ─────────
+RSI_LOW           = 40      # อนุญาตให้ RSI ย่อลงมาต่ำได้ เพื่อหาจังหวะเก็บของ
+RSI_HIGH          = 70      # กันหุ้นที่แพงเกินไป (Overbought)
+MIN_MACD_HIST     = -0.5    # ระยะยาว MACD Hist ติดลบได้นิดหน่อยเวลาราคาย่อ
 
 # ── ชั้น 3: Volume Quality (บังคับ) ─────────
-MIN_AVG_VOLUME    = 3_000_000  # Volume เฉลี่ย 20 วัน (เข้มขึ้น 1M → 3M)
-MIN_VOL_SURGE     = 1.0        # วันนี้ต้องมากกว่าค่าเฉลี่ยอย่างน้อย 1.0x
+MIN_AVG_VOLUME    = 2_000_000  # ผ่อนปรนลงมาให้ครอบคลุมหุ้นพื้นฐานดีที่อาจไม่หวือหวา
+MIN_VOL_SURGE     = 0.0        # ระยะยาวไม่ต้องสนใจ Volume เข้าออกรายวัน
 
 # ── ชั้น 4: Price Structure (เพิ่มคะแนน) ────
-MAX_PCT_FROM_52W  = 15.0    # ราคาต้องอยู่ภายใน 15% ของ 52-week high
-MIN_5D_MOMENTUM   = 0.5     # ราคาต้องขึ้น > 0.5% จาก 5 วันก่อน
+MAX_PCT_FROM_52W  = 20.0    # ย่อได้ลึกถึง 20% จากจุดสูงสุด (มองเป็นส่วนลด)
+MIN_5D_MOMENTUM   = -5.0    # ยอมรับการย่อตัวระยะสั้นได้
 
 # ── Scoring: ส่ง Telegram เฉพาะ Score >= N ──
 MIN_SCORE         = 6       # เกณฑ์ผ่าน (max = 10)
@@ -167,6 +164,12 @@ def score_stock(df: pd.DataFrame) -> tuple:
     momentum_5d  = ((price - price_5d) / price_5d * 100) if price_5d > 0 else 0.0
     vol_surge    = today_vol / avg_vol_20 if avg_vol_20 > 0 else 0.0
 
+    # ─── Entry Levels (สำหรับระยะยาว) ────────────────
+    # แบ่งไม้เข้า (DCA / Accumulation) ตามเส้นค่าเฉลี่ย
+    entry_current  = price          # ไม้แรก: ราคาตลาดปัจจุบัน
+    entry_ema50    = round(e50, 2)  # ไม้สอง: รอรับเมื่อย่อลงมาแตะ EMA50
+    entry_ema200   = round(e200, 2) # ไม้สาม (ไม้ตาย): รอรับเมื่อเกิด Panic Sell ลงมาแตะ EMA200
+
     details.update({
         "price": round(price, 2), "ema20": round(e20, 2),
         "ema50": round(e50, 2),   "ema200": round(e200, 2),
@@ -175,6 +178,10 @@ def score_stock(df: pd.DataFrame) -> tuple:
         "adx": round(adx_val, 1), "e50_slope_pct": round(e50_slope_pct, 2),
         "pct_from_52w": round(pct_from_52w, 1), "momentum_5d": round(momentum_5d, 2),
         "avg_vol": int(avg_vol_20), "vol_surge": round(vol_surge, 2),
+        # Trade levels (Long-term)
+        "entry_current":  entry_current,
+        "entry_ema50":    entry_ema50,
+        "entry_ema200":   entry_ema200,
     })
 
     # ══════════════════════════════════════════
@@ -185,18 +192,18 @@ def score_stock(df: pd.DataFrame) -> tuple:
         details["fail"] = "EMA Stack ไม่ครบ"
         return -1, details
 
-    # 1b: EMA50 Slope ต้องเป็นขาขึ้น
+    # 1b: EMA50 Slope ต้องเป็นขาขึ้นหรือทรงตัว
     if e50_slope_pct < MIN_EMA50_SLOPE:
         details["fail"] = f"EMA50 Slope ต่ำ ({e50_slope_pct:.2f}%)"
         return -1, details
 
-    # 1c: ADX > 25 — มีเทรนด์จริง ไม่ Sideway
+    # 1c: ADX > 20 — มีเทรนด์ระยะยาว
     if adx_val < MIN_ADX:
         details["fail"] = f"ADX ต่ำ ({adx_val:.1f} < {MIN_ADX})"
         return -1, details
 
     score += 2
-    if adx_val >= 35:          # Bonus: เทรนด์แรงมาก
+    if adx_val >= 30:          # Bonus: เทรนด์แรง
         score += 1
         details["bonus_adx"] = True
 
@@ -208,11 +215,11 @@ def score_stock(df: pd.DataFrame) -> tuple:
         return -1, details
 
     if macd_hist <= MIN_MACD_HIST:
-        details["fail"] = f"MACD Hist ไม่ Positive ({macd_hist:.4f})"
+        details["fail"] = f"MACD Hist ต่ำเกินไป ({macd_hist:.4f})"
         return -1, details
 
     score += 2
-    if 55 <= rsi_val <= 62:    # Bonus: RSI Zone ทอง
+    if 40 <= rsi_val <= 55:    # Bonus: RSI โซนเก็บของ (ย่อตัวลงมา)
         score += 1
         details["bonus_rsi"] = True
 
@@ -224,18 +231,18 @@ def score_stock(df: pd.DataFrame) -> tuple:
         return -1, details
 
     score += 2
-    if vol_surge >= 1.5:       # Bonus: Volume Surge วันนี้สูงกว่าค่าเฉลี่ย 1.5x
+    if vol_surge >= 1.5:       # Bonus: มีแรงซื้อผิดปกติ
         score += 1
         details["bonus_vol_surge"] = True
 
     # ══════════════════════════════════════════
     #  ชั้น 4 — Price Structure (เพิ่มคะแนน)
     # ══════════════════════════════════════════
-    if pct_from_52w <= MAX_PCT_FROM_52W:   # ราคาใกล้ 52W High
+    if pct_from_52w <= MAX_PCT_FROM_52W:   # ราคาไม่หลุดไกลจาก 52W High
         score += 1
         details["pass_52w"] = True
 
-    if momentum_5d >= MIN_5D_MOMENTUM:     # 5D Momentum บวก
+    if momentum_5d >= MIN_5D_MOMENTUM:     # โครงสร้างระยะสั้นไม่พัง
         score += 1
         details["pass_5d_mom"] = True
 
@@ -400,40 +407,42 @@ def build_message(stock: dict, headlines: list, confidence: float) -> str:
     else:        badge = "🥉 WATCH"
 
     bonuses = []
-    if stock.get("bonus_adx"):       bonuses.append("⚡ ADX แรงมาก (>35)")
-    if stock.get("bonus_rsi"):       bonuses.append("🎯 RSI Zone ทอง (55–62)")
-    if stock.get("bonus_vol_surge"): bonuses.append("📣 Volume Surge (>1.5x)")
-    if stock.get("pass_52w"):        bonuses.append("🏔 ใกล้ 52W High")
-    if stock.get("pass_5d_mom"):     bonuses.append("🚀 5D Momentum บวก")
+    if stock.get("bonus_adx"):       bonuses.append("⚡ ADX มีเทรนด์แข็งแกร่ง")
+    if stock.get("bonus_rsi"):       bonuses.append("🎯 RSI โซนเก็บของ")
+    if stock.get("bonus_vol_surge"): bonuses.append("📣 มีแรงซื้อผิดปกติ")
+    if stock.get("pass_52w"):        bonuses.append("🏔 โครงสร้างราคายกตัว")
     bonus_line = "  ".join(bonuses) if bonuses else "—"
 
     news_lines = "".join(f"  {i}. {h}\n" for i, h in enumerate(headlines, 1))
     conf_pct   = f"{confidence*100:.0f}%"
 
+    # ดึงค่า Entry
+    ecurrent = stock["entry_current"]
+    e50      = stock["entry_ema50"]
+    e200     = stock["entry_ema200"]
+
     return (
-        f"📈 <b>${t}</b>  {badge}\n"
+        f"📈 <b>${t}</b>  {badge} (Long-term)\n"
         f"<code>{bar}</code>\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"💲 <b>ราคา</b>         ${stock['price']:,.2f}\n"
+        f"💲 <b>ราคาปัจจุบัน</b>  ${stock['price']:,.2f}\n"
         f"📊 <b>EMA 20/50/200</b>  "
         f"${stock['ema20']:,.2f} / ${stock['ema50']:,.2f} / ${stock['ema200']:,.2f}\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
         f"🔢 <b>RSI (14)</b>     {stock['rsi']}\n"
         f"📉 <b>MACD Hist</b>   {stock['macd_hist']:+.4f}\n"
-        f"💪 <b>ADX (14)</b>    {stock['adx']}\n"
-        f"📐 <b>EMA50 Slope</b> {stock['e50_slope_pct']:+.2f}%\n"
-        f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"📦 <b>Vol เฉลี่ย</b>   {fmt_vol(stock['avg_vol'])}\n"
-        f"📊 <b>Vol Surge</b>   {stock['vol_surge']:.2f}x\n"
         f"🏔 <b>ห่าง 52W High</b> -{stock['pct_from_52w']:.1f}%\n"
-        f"🚀 <b>5D Momentum</b>  {stock['momentum_5d']:+.2f}%\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"🎯 <b>แผนการสะสม (Accumulation Zones)</b>\n"
+        f"\n"
+        f"  ▶️ <b>ไม้แรก (ราคาปัจจุบัน)</b> : <code>${ecurrent:,.2f}</code>\n"
+        f"  ▶️ <b>รอรับย่อ (EMA50)</b>     : <code>${e50:,.2f}</code>\n"
+        f"  ▶️ <b>ไม้เผื่อ Panic (EMA200)</b>: <code>${e200:,.2f}</code>\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
         f"✨ <b>Signals:</b> {bonus_line}\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
         f"📰 <b>ข่าว (🟢 Positive {conf_pct})</b>\n"
         f"{news_lines}"
-        f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"⚠️ <i>เพื่อการศึกษาเท่านั้น ไม่ใช่คำแนะนำลงทุน</i>"
     )
 
 
@@ -442,9 +451,9 @@ def build_message(stock: dict, headlines: list, confidence: float) -> str:
 # ══════════════════════════════════════════════
 def run_scan():
     log.info("══════════════════════════════════════════")
-    log.info("  S&P 500 STRICT SCANNER v2 เริ่มงาน")
+    log.info("  S&P 500 LONG-TERM SCANNER เริ่มงาน")
     log.info(f"  Score>={MIN_SCORE} | ADX>{MIN_ADX} | RSI {RSI_LOW}–{RSI_HIGH}")
-    log.info(f"  Vol>{MIN_AVG_VOLUME/1e6:.0f}M | MACD Hist>0 | Full EMA Stack")
+    log.info(f"  Vol>{MIN_AVG_VOLUME/1e6:.0f}M | MACD Hist>{MIN_MACD_HIST} | Full EMA Stack")
     log.info("══════════════════════════════════════════")
 
     tickers = get_sp500_tickers()
@@ -454,7 +463,7 @@ def run_scan():
     candidates = fetch_and_filter(tickers)
     if not candidates:
         send_telegram(
-            f"🔍 <b>S&P 500 Strict Scanner</b>\n\n"
+            f"🔍 <b>S&P 500 Long-Term Scanner</b>\n\n"
             f"ไม่มีหุ้นผ่านเกณฑ์ 4 ชั้นวันนี้ 📭\n"
             f"<i>(เกณฑ์: Score >= {MIN_SCORE}/10)</i>"
         )
@@ -482,7 +491,7 @@ def run_scan():
 
     if not positive_results:
         send_telegram(
-            f"🔍 <b>S&P 500 Strict Scanner</b>\n\n"
+            f"🔍 <b>S&P 500 Long-Term Scanner</b>\n\n"
             f"ผ่านเกณฑ์กราฟ {len(candidates)} ตัว\n"
             f"แต่ไม่มีข่าว Positive วันนี้ 📭"
         )
@@ -490,9 +499,9 @@ def run_scan():
 
     # ── Summary ──
     send_telegram(
-        f"🚨 <b>S&P 500 STRICT SCAN</b> 🚨\n"
-        f"พบหุ้นชั้นเลิศ <b>{len(positive_results)} ตัว</b>\n"
-        f"(จาก {len(candidates)} ตัวผ่านเกณฑ์ 4 ชั้น / Score>={MIN_SCORE})\n"
+        f"🚨 <b>S&P 500 LONG-TERM SCAN</b> 🚨\n"
+        f"พบหุ้นน่าสะสม <b>{len(positive_results)} ตัว</b>\n"
+        f"(จาก {len(candidates)} ตัวผ่านเกณฑ์ / Score>={MIN_SCORE})\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
         f"🏆 ≥9  🥇 ≥8  🥈 ≥7  🥉 ≥6"
     )
@@ -512,13 +521,13 @@ def run_scan():
 @app.route("/")
 def index():
     return jsonify({
-        "status": "ok", "version": "v2-strict",
+        "status": "ok", "version": "v2-longterm",
         "filters": {
             "layer1_trend":   "price > EMA20 > EMA50 > EMA200",
             "layer1_slope":   f"EMA50 slope >= {MIN_EMA50_SLOPE}%",
             "layer1_adx":     f">= {MIN_ADX}",
             "layer2_rsi":     f"{RSI_LOW}–{RSI_HIGH}",
-            "layer2_macd":    "histogram > 0",
+            "layer2_macd":    f"histogram > {MIN_MACD_HIST}",
             "layer3_volume":  f">= {MIN_AVG_VOLUME/1e6:.0f}M",
             "min_score":      f"{MIN_SCORE}/10",
         }
@@ -538,7 +547,7 @@ def trigger():
     threading.Thread(target=run_scan, daemon=True).start()
     return jsonify({
         "status": "accepted",
-        "message": "STRICT SCANNER v2 เริ่มสแกนแล้ว 🔍",
+        "message": "LONG-TERM SCANNER เริ่มสแกนแล้ว 🔍",
         "filters": f"Score>={MIN_SCORE} | ADX>{MIN_ADX} | RSI {RSI_LOW}–{RSI_HIGH}",
     })
 
