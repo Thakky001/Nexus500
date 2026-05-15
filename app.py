@@ -958,15 +958,15 @@ DASHBOARD_HTML = """<!DOCTYPE html>
           <th>Tech Score</th>
           <th>Sentiment</th>
           <th>Composite</th>
-          <th>ราคา</th>
+          <th>ราคาตอนสแกน</th>
+          <th>ราคาปัจจุบัน</th>
+          <th>เปลี่ยนแปลง</th>
           <th class="hide-mobile">RSI</th>
           <th class="hide-mobile">ADX</th>
           <th class="hide-mobile">MACD Hist</th>
           <th class="hide-mobile">ห่าง 52W High</th>
           <th class="hide-mobile">EMA50 Entry</th>
           <th class="hide-mobile">EMA200 Entry</th>
-          <th>ราคาปัจจุบัน</th>
-          <th>เปลี่ยนแปลง</th>
           <th>ข่าว</th>
         </tr>
       </thead>
@@ -1089,15 +1089,15 @@ function renderTable(data) {
       </td>
       <td><span class="conf-badge">🟢 ${confPct}%</span></td>
       <td style="font-family:var(--font-mono);font-weight:700;color:var(--gold)">${parseFloat(r.composite||0).toFixed(2)}</td>
-      <td style="font-family:var(--font-mono)">$${parseFloat(r.price||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
+      <td style="font-family:var(--font-mono);color:var(--subtext)">$${parseFloat(r.price||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
+      <td style="font-family:var(--font-mono)">${curPriceStr}</td>
+      <td>${changePctStr}</td>
       <td class="hide-mobile ${rsiClass(r.rsi)}" style="font-family:var(--font-mono)">${r.rsi}</td>
       <td class="hide-mobile" style="font-family:var(--font-mono)">${r.adx}</td>
       <td class="hide-mobile ${macdClass}" style="font-family:var(--font-mono)">${macdSign}${parseFloat(r.macd_hist||0).toFixed(4)}</td>
       <td class="hide-mobile" style="font-family:var(--font-mono);color:var(--subtext)">-${r.pct_from_52w}%</td>
       <td class="hide-mobile" style="font-family:var(--font-mono);color:var(--green)">$${parseFloat(r.entry_ema50||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
       <td class="hide-mobile" style="font-family:var(--font-mono);color:var(--subtext)">$${parseFloat(r.entry_ema200||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
-      <td style="font-family:var(--font-mono)">${curPriceStr}</td>
-      <td>${changePctStr}</td>
       <td class="news-cell">
         <div class="news-preview">${newsPreview}</div>
         <div class="news-tooltip">${newsFull}</div>
