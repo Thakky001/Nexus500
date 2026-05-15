@@ -1,13 +1,19 @@
 """
 ╔══════════════════════════════════════════════════════════╗
-║         S&P 500 Stock Scanner Bot  •  app.py             ║
+║      S&P 500 Stock Scanner Bot  •  app.py  [v2 STRICT]  ║
 ║  Flask + yfinance + pandas-ta + FinBERT + Telegram       ║
+╠══════════════════════════════════════════════════════════╣
+║  ระบบคัดกรอง 4 ชั้น + Scoring 0–10 คะแนน               ║
+║  ชั้น 1 : Trend Alignment  (EMA20>50>200 + Slope + ADX) ║
+║  ชั้น 2 : Momentum         (RSI + MACD Histogram)        ║
+║  ชั้น 3 : Volume Quality   (Avg Vol + Volume Surge)      ║
+║  ชั้น 4 : Price Structure  (52W High + Short Momentum)   ║
 ╚══════════════════════════════════════════════════════════╝
 
-วิธีตั้งค่า Environment Variables บน Render:
+Environment Variables บน Render:
   TELEGRAM_BOT_TOKEN   = token จาก @BotFather
   TELEGRAM_CHAT_ID     = Chat ID ของ Channel (ขึ้นต้นด้วย -100...)
-  HF_API_TOKEN         = Hugging Face API Token (จาก hf.co/settings/tokens)
+  HF_API_TOKEN         = Hugging Face API Token
 """
 
 import io
@@ -18,7 +24,7 @@ import logging
 
 import requests
 import pandas as pd
-import pandas_ta_classic as ta  # เปลี่ยนจาก pandas_ta เป็น pandas_ta_classic
+import pandas_ta_classic as ta
 import yfinance as yf
 from flask import Flask, jsonify
 
@@ -39,44 +45,57 @@ TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID   = os.environ.get("TELEGRAM_CHAT_ID", "")
 HF_API_TOKEN       = os.environ.get("HF_API_TOKEN", "")
 
-# FinBERT model บน Hugging Face
-HF_MODEL_URL = (
-    "https://router.huggingface.co/hf-inference/models/ProsusAI/finbert"
-)
+HF_MODEL_URL = "https://router.huggingface.co/hf-inference/models/ProsusAI/finbert"
 
-# พารามิเตอร์คัดกรอง
-MIN_VOLUME      = 1_000_000   # วอลุ่มขั้นต่ำ
-RSI_LOW         = 45          # RSI ขั้นต่ำ
-RSI_HIGH        = 65          # RSI สูงสุด
-CHUNK_SIZE      = 50          # ดึงข้อมูลทีละกี่ตัว
-CHUNK_PAUSE     = 10          # พักกี่วินาทีระหว่าง chunk
-NEWS_PAUSE      = 5           # พักกี่วินาทีระหว่างดึงข่าวแต่ละตัว
-AI_PAUSE        = 20          # พักกี่วินาทีระหว่างส่ง AI แต่ละตัว
-AI_RETRY_WAIT   = 30          # รอกี่วินาทีเมื่อโดน 429
+# ══════════════════════════════════════════════
+#  ⚙️  เกณฑ์คัดกรอง — ปรับได้ที่นี่ที่เดียว
+# ══════════════════════════════════════════════
 
-# ─────────────────────────────────────────────
-#  Flask App
+# ── ชั้น 1: Trend Alignment (บังคับทุกข้อ) ──
+MIN_ADX           = 25      # ADX ขั้นต่ำ: เทรนด์ต้องแรงพอ
+EMA_SLOPE_DAYS    = 10      # วัด Slope EMA50 ย้อนหลังกี่วัน
+MIN_EMA50_SLOPE   = 0.1     # EMA50 ต้องขึ้นอย่างน้อย 0.1% ใน N วัน
+
+# ── ชั้น 2: Momentum (บังคับทุกข้อ) ─────────
+RSI_LOW           = 50      # RSI ขั้นต่ำ (เข้มขึ้นจาก 45 → 50)
+RSI_HIGH          = 68      # RSI สูงสุด (กัน Overbought)
+MIN_MACD_HIST     = 0.0     # MACD Histogram ต้องเป็นบวก (> 0)
+
+# ── ชั้น 3: Volume Quality (บังคับ) ─────────
+MIN_AVG_VOLUME    = 3_000_000  # Volume เฉลี่ย 20 วัน (เข้มขึ้น 1M → 3M)
+MIN_VOL_SURGE     = 1.0        # วันนี้ต้องมากกว่าค่าเฉลี่ยอย่างน้อย 1.0x
+
+# ── ชั้น 4: Price Structure (เพิ่มคะแนน) ────
+MAX_PCT_FROM_52W  = 15.0    # ราคาต้องอยู่ภายใน 15% ของ 52-week high
+MIN_5D_MOMENTUM   = 0.5     # ราคาต้องขึ้น > 0.5% จาก 5 วันก่อน
+
+# ── Scoring: ส่ง Telegram เฉพาะ Score >= N ──
+MIN_SCORE         = 6       # เกณฑ์ผ่าน (max = 10)
+
+# ── Rate Limit Protection ────────────────────
+CHUNK_SIZE        = 50
+CHUNK_PAUSE       = 10
+NEWS_PAUSE        = 5
+AI_PAUSE          = 20
+AI_RETRY_WAIT     = 60
+
 # ─────────────────────────────────────────────
 app = Flask(__name__)
 
 
 # ══════════════════════════════════════════════
-#  STEP 1 — โหลดรายชื่อ S&P 500 จาก Wikipedia
+#  STEP 1 — โหลดรายชื่อ S&P 500
 # ══════════════════════════════════════════════
-def get_sp500_tickers() -> list[str]:
-    """ดึงรายชื่อหุ้น S&P 500 ทั้งหมดจาก Wikipedia"""
+def get_sp500_tickers() -> list:
     url = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
-    headers = {
-        "User-Agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/124.0.0.0 Safari/537.36"
-        )
-    }
+    headers = {"User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+    )}
     try:
         resp = requests.get(url, headers=headers, timeout=15)
         resp.raise_for_status()
-        tables = pd.read_html(io.StringIO(resp.text), attrs={"id": "constituents"})
+        tables  = pd.read_html(io.StringIO(resp.text), attrs={"id": "constituents"})
         tickers = tables[0]["Symbol"].str.replace(".", "-", regex=False).tolist()
         log.info(f"โหลดรายชื่อหุ้นสำเร็จ: {len(tickers)} ตัว")
         return tickers
@@ -86,30 +105,155 @@ def get_sp500_tickers() -> list[str]:
 
 
 # ══════════════════════════════════════════════
-#  STEP 2 — ดึงข้อมูลกราฟและคัดกรองทางเทคนิค
+#  STEP 2 — คัดกรอง 4 ชั้น + Scoring
 # ══════════════════════════════════════════════
-def fetch_and_filter(tickers: list[str]) -> list[dict]:
+def score_stock(df: pd.DataFrame) -> tuple:
     """
-    ดึงกราฟย้อนหลัง 1 ปี ทีละ CHUNK_SIZE ตัว
-    แล้วคัดเฉพาะหุ้นที่:
-      - Volume เฉลี่ย 20 วัน > 1 ล้าน
-      - ราคา > EMA50 > EMA200
-      - RSI อยู่ระหว่าง 45–65
+    คัดกรองและให้คะแนนหุ้น 0–10
+    คืนค่า (score, detail_dict)
+    หาก fail ชั้นบังคับ จะคืน score = -1 พร้อมเหตุผล
     """
+    score   = 0
+    details = {}
+
+    close  = df["Close"]
+    high   = df["High"]
+    low    = df["Low"]
+    volume = df["Volume"]
+    last   = df.iloc[-1]
+
+    # ─── คำนวณ Indicators ทั้งหมด ───────────
+    ema20    = ta.ema(close, length=20)
+    ema50    = ta.ema(close, length=50)
+    ema200   = ta.ema(close, length=200)
+    rsi      = ta.rsi(close, length=14)
+    macd_df  = ta.macd(close, fast=12, slow=26, signal=9)
+    adx_df   = ta.adx(high, low, close, length=14)
+
+    price      = float(last["Close"])
+    e20        = float(ema20.iloc[-1])
+    e50        = float(ema50.iloc[-1])
+    e200       = float(ema200.iloc[-1])
+    rsi_val    = float(rsi.iloc[-1])
+    avg_vol_20 = float(volume.tail(20).mean())
+    today_vol  = float(last["Volume"])
+    high_52w   = float(high.tail(252).max())
+    price_5d   = float(close.iloc[-6])
+
+    # MACD
+    try:
+        hist_col = [c for c in macd_df.columns if c.startswith("MACDh")][0]
+        line_col = [c for c in macd_df.columns if c.startswith("MACD_")][0]
+        sig_col  = [c for c in macd_df.columns if c.startswith("MACDs")][0]
+        macd_hist = float(macd_df[hist_col].iloc[-1])
+        macd_line = float(macd_df[line_col].iloc[-1])
+        macd_sig  = float(macd_df[sig_col].iloc[-1])
+    except Exception:
+        macd_hist = macd_line = macd_sig = 0.0
+
+    # ADX
+    try:
+        adx_col = [c for c in adx_df.columns if c.startswith("ADX")][0]
+        adx_val = float(adx_df[adx_col].iloc[-1])
+    except Exception:
+        adx_val = 0.0
+
+    # EMA50 Slope %
+    e50_past      = float(ema50.iloc[-1 - EMA_SLOPE_DAYS])
+    e50_slope_pct = ((e50 - e50_past) / e50_past * 100) if e50_past > 0 else 0.0
+
+    # อื่นๆ
+    pct_from_52w = ((high_52w - price) / high_52w * 100) if high_52w > 0 else 999.0
+    momentum_5d  = ((price - price_5d) / price_5d * 100) if price_5d > 0 else 0.0
+    vol_surge    = today_vol / avg_vol_20 if avg_vol_20 > 0 else 0.0
+
+    details.update({
+        "price": round(price, 2), "ema20": round(e20, 2),
+        "ema50": round(e50, 2),   "ema200": round(e200, 2),
+        "rsi": round(rsi_val, 1), "macd_hist": round(macd_hist, 4),
+        "macd_line": round(macd_line, 4), "macd_sig": round(macd_sig, 4),
+        "adx": round(adx_val, 1), "e50_slope_pct": round(e50_slope_pct, 2),
+        "pct_from_52w": round(pct_from_52w, 1), "momentum_5d": round(momentum_5d, 2),
+        "avg_vol": int(avg_vol_20), "vol_surge": round(vol_surge, 2),
+    })
+
+    # ══════════════════════════════════════════
+    #  ชั้น 1 — Trend Alignment (บังคับ) = 2 คะแนน
+    # ══════════════════════════════════════════
+    # 1a: Full EMA Stack — ราคา > EMA20 > EMA50 > EMA200
+    if not (price > e20 > e50 > e200):
+        details["fail"] = "EMA Stack ไม่ครบ"
+        return -1, details
+
+    # 1b: EMA50 Slope ต้องเป็นขาขึ้น
+    if e50_slope_pct < MIN_EMA50_SLOPE:
+        details["fail"] = f"EMA50 Slope ต่ำ ({e50_slope_pct:.2f}%)"
+        return -1, details
+
+    # 1c: ADX > 25 — มีเทรนด์จริง ไม่ Sideway
+    if adx_val < MIN_ADX:
+        details["fail"] = f"ADX ต่ำ ({adx_val:.1f} < {MIN_ADX})"
+        return -1, details
+
+    score += 2
+    if adx_val >= 35:          # Bonus: เทรนด์แรงมาก
+        score += 1
+        details["bonus_adx"] = True
+
+    # ══════════════════════════════════════════
+    #  ชั้น 2 — Momentum (บังคับ) = 2 คะแนน
+    # ══════════════════════════════════════════
+    if not (RSI_LOW <= rsi_val <= RSI_HIGH):
+        details["fail"] = f"RSI ออกนอก Zone ({rsi_val:.1f})"
+        return -1, details
+
+    if macd_hist <= MIN_MACD_HIST:
+        details["fail"] = f"MACD Hist ไม่ Positive ({macd_hist:.4f})"
+        return -1, details
+
+    score += 2
+    if 55 <= rsi_val <= 62:    # Bonus: RSI Zone ทอง
+        score += 1
+        details["bonus_rsi"] = True
+
+    # ══════════════════════════════════════════
+    #  ชั้น 3 — Volume Quality (บังคับ) = 2 คะแนน
+    # ══════════════════════════════════════════
+    if avg_vol_20 < MIN_AVG_VOLUME:
+        details["fail"] = f"Volume ต่ำ ({avg_vol_20/1e6:.1f}M < {MIN_AVG_VOLUME/1e6:.0f}M)"
+        return -1, details
+
+    score += 2
+    if vol_surge >= 1.5:       # Bonus: Volume Surge วันนี้สูงกว่าค่าเฉลี่ย 1.5x
+        score += 1
+        details["bonus_vol_surge"] = True
+
+    # ══════════════════════════════════════════
+    #  ชั้น 4 — Price Structure (เพิ่มคะแนน)
+    # ══════════════════════════════════════════
+    if pct_from_52w <= MAX_PCT_FROM_52W:   # ราคาใกล้ 52W High
+        score += 1
+        details["pass_52w"] = True
+
+    if momentum_5d >= MIN_5D_MOMENTUM:     # 5D Momentum บวก
+        score += 1
+        details["pass_5d_mom"] = True
+
+    return score, details
+
+
+def fetch_and_filter(tickers: list) -> list:
+    """ดาวน์โหลดกราฟ + รัน 4-layer filter + sorting ตาม Score"""
     passed = []
-    chunks = [tickers[i : i + CHUNK_SIZE] for i in range(0, len(tickers), CHUNK_SIZE)]
+    chunks = [tickers[i: i + CHUNK_SIZE] for i in range(0, len(tickers), CHUNK_SIZE)]
 
     for idx, chunk in enumerate(chunks, start=1):
-        log.info(f"กำลังโหลด chunk {idx}/{len(chunks)} ({len(chunk)} ตัว)...")
+        log.info(f"โหลด chunk {idx}/{len(chunks)} ({len(chunk)} ตัว)...")
         try:
             raw = yf.download(
-                tickers=chunk,
-                period="1y",
-                interval="1d",
-                group_by="ticker",
-                auto_adjust=True,
-                progress=False,
-                threads=False,
+                tickers=chunk, period="1y", interval="1d",
+                group_by="ticker", auto_adjust=True,
+                progress=False, threads=False,
             )
         except Exception as e:
             log.warning(f"ดาวน์โหลด chunk {idx} ล้มเหลว: {e}")
@@ -118,15 +262,13 @@ def fetch_and_filter(tickers: list[str]) -> list[dict]:
 
         for ticker in chunk:
             try:
-                # yfinance v1.x: multi-ticker → columns are (field, ticker)
-                # single ticker → columns are flat (Close, Volume, ...)
                 if len(chunk) == 1:
                     df = raw.copy()
                 else:
                     if not hasattr(raw.columns, "levels"):
                         continue
-                    lvl0 = raw.columns.get_level_values(0).unique().tolist()
                     lvl1 = raw.columns.get_level_values(1).unique().tolist()
+                    lvl0 = raw.columns.get_level_values(0).unique().tolist()
                     if ticker in lvl1:
                         df = raw.xs(ticker, axis=1, level=1).copy()
                     elif ticker in lvl0:
@@ -134,68 +276,47 @@ def fetch_and_filter(tickers: list[str]) -> list[dict]:
                     else:
                         continue
 
-                df.dropna(subset=["Close", "Volume"], inplace=True)
-                if len(df) < 210:          # ต้องการข้อมูลพอคำนวณ EMA200
+                df.dropna(subset=["Close", "Volume", "High", "Low"], inplace=True)
+                if len(df) < 215:
                     continue
 
-                # ─── คำนวณ Indicators ───
-                close = df["Close"]
-                df["ema50"]  = ta.ema(close, length=50)
-                df["ema200"] = ta.ema(close, length=200)
-                df["rsi"]    = ta.rsi(close, length=14)
+                score, details = score_stock(df)
 
-                last = df.iloc[-1]
-                avg_vol = df["Volume"].tail(20).mean()
-
-                # ─── เกณฑ์คัดกรอง ───
-                price   = float(last["Close"])
-                ema50   = float(last["ema50"])
-                ema200  = float(last["ema200"])
-                rsi_val = float(last["rsi"])
-
-                if (
-                    avg_vol > MIN_VOLUME
-                    and price > ema50 > ema200
-                    and RSI_LOW <= rsi_val <= RSI_HIGH
-                ):
-                    passed.append(
-                        {
-                            "ticker":  ticker,
-                            "price":   round(price, 2),
-                            "ema50":   round(ema50, 2),
-                            "ema200":  round(ema200, 2),
-                            "rsi":     round(rsi_val, 2),
-                            "avg_vol": int(avg_vol),
-                        }
+                if score >= MIN_SCORE:
+                    passed.append({"ticker": ticker, "score": score, **details})
+                    log.info(
+                        f"  ✅ {ticker} Score:{score}/10 | "
+                        f"RSI:{details['rsi']} ADX:{details['adx']} "
+                        f"MACDh:{details['macd_hist']} 5dM:{details['momentum_5d']}%"
                     )
-                    log.info(f"  ✅ {ticker} ผ่านเกณฑ์ — Price:{price:.2f} EMA50:{ema50:.2f} RSI:{rsi_val:.1f}")
+                elif score == -1:
+                    log.debug(f"  ❌ {ticker} — {details.get('fail','?')}")
+                else:
+                    log.debug(f"  ⚠️ {ticker} Score:{score} (ต่ำกว่า {MIN_SCORE})")
 
             except Exception as e:
                 log.debug(f"  ❌ {ticker}: {e}")
 
-        # พักระหว่าง chunk (ยกเว้น chunk สุดท้าย)
         if idx < len(chunks):
-            log.info(f"พัก {CHUNK_PAUSE} วินาที...")
+            log.info(f"พัก {CHUNK_PAUSE}s...")
             time.sleep(CHUNK_PAUSE)
 
-    log.info(f"ผ่านเกณฑ์กราฟทั้งหมด: {len(passed)} ตัว")
+    passed.sort(key=lambda x: x["score"], reverse=True)
+    log.info(f"ผ่านเกณฑ์ทั้งหมด: {len(passed)} ตัว (Score >= {MIN_SCORE})")
     return passed
 
 
 # ══════════════════════════════════════════════
-#  STEP 3 — ดึงข่าวล่าสุดผ่าน Yahoo Finance RSS
+#  STEP 3 — ดึงข่าว Yahoo Finance RSS
 # ══════════════════════════════════════════════
-def fetch_news(ticker: str, max_items: int = 3) -> list[str]:
-    """ดึงหัวข้อข่าวล่าสุดจาก Yahoo Finance RSS"""
+def fetch_news(ticker: str, max_items: int = 3) -> list:
     url = f"https://feeds.finance.yahoo.com/rss/2.0/headline?s={ticker}&region=US&lang=en-US"
     headlines = []
     try:
-        resp = requests.get(url, timeout=10,
-                            headers={"User-Agent": "Mozilla/5.0"})
+        resp = requests.get(url, timeout=10, headers={"User-Agent": "Mozilla/5.0"})
         resp.raise_for_status()
-        # parse XML อย่างง่ายด้วย lxml ผ่าน pandas read_xml
         from lxml import etree
-        root = etree.fromstring(resp.content)
+        root  = etree.fromstring(resp.content)
         items = root.findall(".//item/title")
         for item in items[:max_items]:
             if item.text:
@@ -206,60 +327,48 @@ def fetch_news(ticker: str, max_items: int = 3) -> list[str]:
 
 
 # ══════════════════════════════════════════════
-#  STEP 4 — วิเคราะห์ Sentiment ด้วย FinBERT
+#  STEP 4 — FinBERT Sentiment + Confidence
 # ══════════════════════════════════════════════
-def analyze_sentiment(headlines: list[str]) -> str:
-    """
-    ส่งหัวข้อข่าวไปให้ FinBERT บน Hugging Face
-    คืนค่า: "positive" | "negative" | "neutral" | "error"
-    """
+def analyze_sentiment(headlines: list) -> tuple:
+    """คืนค่า (label, confidence_score)"""
     if not headlines:
-        return "neutral"
+        return "neutral", 0.0
 
-    text = ". ".join(headlines)
+    text    = ". ".join(headlines)
     headers = {"Authorization": f"Bearer {HF_API_TOKEN}"}
     payload = {"inputs": text}
 
     for attempt in range(3):
         try:
-            resp = requests.post(
-                HF_MODEL_URL, headers=headers, json=payload, timeout=30
-            )
+            resp = requests.post(HF_MODEL_URL, headers=headers, json=payload, timeout=90)
             if resp.status_code == 429:
-                log.warning(f"FinBERT 429 — รอ {AI_RETRY_WAIT} วินาที (attempt {attempt+1})")
+                log.warning(f"FinBERT 429 — รอ {AI_RETRY_WAIT}s (attempt {attempt+1})")
                 time.sleep(AI_RETRY_WAIT)
                 continue
             resp.raise_for_status()
             result = resp.json()
-
-            # FinBERT คืนค่าเป็น list ของ list ของ dict
-            # [[ {"label": "positive", "score": 0.9}, ... ]]
             if isinstance(result, list) and result:
                 inner = result[0]
                 if isinstance(inner, list):
                     best = max(inner, key=lambda x: x.get("score", 0))
-                    return best.get("label", "neutral").lower()
+                    return best.get("label", "neutral").lower(), best.get("score", 0.0)
                 elif isinstance(inner, dict):
-                    return inner.get("label", "neutral").lower()
-
+                    return inner.get("label", "neutral").lower(), inner.get("score", 0.0)
         except Exception as e:
             log.warning(f"FinBERT error (attempt {attempt+1}): {e}")
             time.sleep(AI_RETRY_WAIT)
 
-    return "error"
+    return "error", 0.0
 
 
 # ══════════════════════════════════════════════
-#  STEP 5 — ส่งข้อความเข้า Telegram
+#  STEP 5 — สร้างข้อความ + ส่ง Telegram
 # ══════════════════════════════════════════════
 def send_telegram(message: str) -> bool:
-    """ส่งข้อความ Markdown v2 ไปยัง Telegram Channel"""
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     payload = {
-        "chat_id":    TELEGRAM_CHAT_ID,
-        "text":       message,
-        "parse_mode": "HTML",
-        "disable_web_page_preview": True,
+        "chat_id": TELEGRAM_CHAT_ID, "text": message,
+        "parse_mode": "HTML", "disable_web_page_preview": True,
     }
     try:
         resp = requests.post(url, json=payload, timeout=10)
@@ -270,72 +379,91 @@ def send_telegram(message: str) -> bool:
         return False
 
 
-def format_volume(vol: int) -> str:
-    if vol >= 1_000_000_000:
-        return f"{vol/1_000_000_000:.1f}B"
-    if vol >= 1_000_000:
-        return f"{vol/1_000_000:.1f}M"
+def fmt_vol(vol: int) -> str:
+    if vol >= 1_000_000_000: return f"{vol/1_000_000_000:.1f}B"
+    if vol >= 1_000_000:     return f"{vol/1_000_000:.1f}M"
     return f"{vol:,}"
 
 
-def build_message(stock: dict, headlines: list[str]) -> str:
-    """สร้างข้อความแจ้งเตือนสวยงาม"""
-    ticker   = stock["ticker"]
-    price    = stock["price"]
-    ema50    = stock["ema50"]
-    ema200   = stock["ema200"]
-    rsi      = stock["rsi"]
-    avg_vol  = format_volume(stock["avg_vol"])
+def score_bar(score: int) -> str:
+    return f"{'█' * score}{'░' * (10 - score)} {score}/10"
 
-    news_lines = ""
-    for i, h in enumerate(headlines, 1):
-        news_lines += f"  {i}. {h}\n"
 
-    msg = (
-        f"📈 <b>${ticker}</b>  •  S&amp;P 500 Scanner\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"💲 <b>ราคา:</b>  ${price:,.2f}\n"
-        f"📊 <b>EMA 50:</b>  ${ema50:,.2f}\n"
-        f"📊 <b>EMA 200:</b>  ${ema200:,.2f}\n"
-        f"🔢 <b>RSI (14):</b>  {rsi}\n"
-        f"📦 <b>Vol เฉลี่ย:</b>  {avg_vol}\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"📰 <b>ข่าวล่าสุด (Sentiment: 🟢 Positive)</b>\n"
+def build_message(stock: dict, headlines: list, confidence: float) -> str:
+    s   = stock["score"]
+    t   = stock["ticker"]
+    bar = score_bar(s)
+
+    if s >= 9:   badge = "🏆 ELITE"
+    elif s >= 8: badge = "🥇 STRONG"
+    elif s >= 7: badge = "🥈 GOOD"
+    else:        badge = "🥉 WATCH"
+
+    bonuses = []
+    if stock.get("bonus_adx"):       bonuses.append("⚡ ADX แรงมาก (>35)")
+    if stock.get("bonus_rsi"):       bonuses.append("🎯 RSI Zone ทอง (55–62)")
+    if stock.get("bonus_vol_surge"): bonuses.append("📣 Volume Surge (>1.5x)")
+    if stock.get("pass_52w"):        bonuses.append("🏔 ใกล้ 52W High")
+    if stock.get("pass_5d_mom"):     bonuses.append("🚀 5D Momentum บวก")
+    bonus_line = "  ".join(bonuses) if bonuses else "—"
+
+    news_lines = "".join(f"  {i}. {h}\n" for i, h in enumerate(headlines, 1))
+    conf_pct   = f"{confidence*100:.0f}%"
+
+    return (
+        f"📈 <b>${t}</b>  {badge}\n"
+        f"<code>{bar}</code>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"💲 <b>ราคา</b>         ${stock['price']:,.2f}\n"
+        f"📊 <b>EMA 20/50/200</b>  "
+        f"${stock['ema20']:,.2f} / ${stock['ema50']:,.2f} / ${stock['ema200']:,.2f}\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"🔢 <b>RSI (14)</b>     {stock['rsi']}\n"
+        f"📉 <b>MACD Hist</b>   {stock['macd_hist']:+.4f}\n"
+        f"💪 <b>ADX (14)</b>    {stock['adx']}\n"
+        f"📐 <b>EMA50 Slope</b> {stock['e50_slope_pct']:+.2f}%\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"📦 <b>Vol เฉลี่ย</b>   {fmt_vol(stock['avg_vol'])}\n"
+        f"📊 <b>Vol Surge</b>   {stock['vol_surge']:.2f}x\n"
+        f"🏔 <b>ห่าง 52W High</b> -{stock['pct_from_52w']:.1f}%\n"
+        f"🚀 <b>5D Momentum</b>  {stock['momentum_5d']:+.2f}%\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"✨ <b>Signals:</b> {bonus_line}\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"📰 <b>ข่าว (🟢 Positive {conf_pct})</b>\n"
         f"{news_lines}"
-        f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"⚠️ <i>ข้อมูลนี้เพื่อการศึกษาเท่านั้น ไม่ใช่คำแนะนำการลงทุน</i>"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"⚠️ <i>เพื่อการศึกษาเท่านั้น ไม่ใช่คำแนะนำลงทุน</i>"
     )
-    return msg
 
 
 # ══════════════════════════════════════════════
-#  งานหลัก — รันใน Background Thread
+#  งานหลัก — Background Thread
 # ══════════════════════════════════════════════
 def run_scan():
-    """ฟังก์ชันสแกนหุ้นทั้งหมด รันเบื้องหลัง"""
-    log.info("═══════════════════════════════")
-    log.info("  เริ่มต้นสแกน S&P 500 Bot")
-    log.info("═══════════════════════════════")
+    log.info("══════════════════════════════════════════")
+    log.info("  S&P 500 STRICT SCANNER v2 เริ่มงาน")
+    log.info(f"  Score>={MIN_SCORE} | ADX>{MIN_ADX} | RSI {RSI_LOW}–{RSI_HIGH}")
+    log.info(f"  Vol>{MIN_AVG_VOLUME/1e6:.0f}M | MACD Hist>0 | Full EMA Stack")
+    log.info("══════════════════════════════════════════")
 
-    # ── Phase 1: โหลดรายชื่อ ──
     tickers = get_sp500_tickers()
     if not tickers:
-        log.error("ไม่มีรายชื่อหุ้น หยุดทำงาน")
         return
 
-    # ── Phase 2: คัดกรองทางเทคนิค ──
     candidates = fetch_and_filter(tickers)
     if not candidates:
-        log.info("ไม่มีหุ้นผ่านเกณฑ์ในวันนี้")
-        send_telegram("🔍 <b>S&P 500 Scanner</b>\n\nไม่มีหุ้นผ่านเกณฑ์ทางเทคนิคในวันนี้ 📭")
+        send_telegram(
+            f"🔍 <b>S&P 500 Strict Scanner</b>\n\n"
+            f"ไม่มีหุ้นผ่านเกณฑ์ 4 ชั้นวันนี้ 📭\n"
+            f"<i>(เกณฑ์: Score >= {MIN_SCORE}/10)</i>"
+        )
         return
 
-    # ── Phase 3+4: ดึงข่าว + วิเคราะห์ AI ──
     positive_results = []
-
     for stock in candidates:
         ticker = stock["ticker"]
-        log.info(f"กำลังดึงข่าว {ticker}...")
+        log.info(f"ดึงข่าว {ticker} (Score:{stock['score']})...")
         time.sleep(NEWS_PAUSE)
 
         headlines = fetch_news(ticker)
@@ -343,40 +471,39 @@ def run_scan():
             log.info(f"  {ticker}: ไม่มีข่าว → ข้าม")
             continue
 
-        log.info(f"  {ticker}: ส่ง FinBERT วิเคราะห์ {len(headlines)} ข่าว...")
+        log.info(f"  {ticker}: ส่ง FinBERT ({len(headlines)} ข่าว)...")
         time.sleep(AI_PAUSE)
 
-        sentiment = analyze_sentiment(headlines)
-        log.info(f"  {ticker}: Sentiment = {sentiment}")
+        label, confidence = analyze_sentiment(headlines)
+        log.info(f"  {ticker}: {label} ({confidence*100:.0f}%)")
 
-        if sentiment == "positive":
-            positive_results.append((stock, headlines))
+        if label == "positive":
+            positive_results.append((stock, headlines, confidence))
 
-    # ── Phase 5: ส่งเข้า Telegram ──
     if not positive_results:
-        log.info("ไม่มีหุ้นที่ข่าว Positive")
-        send_telegram("🔍 <b>S&P 500 Scanner</b>\n\nผ่านเกณฑ์กราฟ แต่ไม่มีข่าว Positive วันนี้ 📭")
+        send_telegram(
+            f"🔍 <b>S&P 500 Strict Scanner</b>\n\n"
+            f"ผ่านเกณฑ์กราฟ {len(candidates)} ตัว\n"
+            f"แต่ไม่มีข่าว Positive วันนี้ 📭"
+        )
         return
 
-    # ส่งหัวข้อสรุปก่อน
-    summary = (
-        f"🚨 <b>S&P 500 Daily Scan</b> 🚨\n"
-        f"พบหุ้นน่าสนใจ <b>{len(positive_results)} ตัว</b> "
-        f"(จาก {len(candidates)} ตัวที่ผ่านเกณฑ์กราฟ)\n"
-        f"━━━━━━━━━━━━━━━━━━━━"
+    # ── Summary ──
+    send_telegram(
+        f"🚨 <b>S&P 500 STRICT SCAN</b> 🚨\n"
+        f"พบหุ้นชั้นเลิศ <b>{len(positive_results)} ตัว</b>\n"
+        f"(จาก {len(candidates)} ตัวผ่านเกณฑ์ 4 ชั้น / Score>={MIN_SCORE})\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"🏆 ≥9  🥇 ≥8  🥈 ≥7  🥉 ≥6"
     )
-    send_telegram(summary)
     time.sleep(2)
 
-    for stock, headlines in positive_results:
-        msg = build_message(stock, headlines)
-        success = send_telegram(msg)
-        log.info(f"ส่ง {stock['ticker']} → {'✅' if success else '❌'}")
+    for stock, headlines, confidence in positive_results:
+        ok = send_telegram(build_message(stock, headlines, confidence))
+        log.info(f"ส่ง {stock['ticker']} Score:{stock['score']} → {'✅' if ok else '❌'}")
         time.sleep(3)
 
-    log.info("═══════════════════════════════")
-    log.info(f"  เสร็จสิ้น! ส่ง {len(positive_results)} ตัว")
-    log.info("═══════════════════════════════")
+    log.info(f"  เสร็จสิ้น! ส่งทั้งหมด {len(positive_results)} ตัว")
 
 
 # ══════════════════════════════════════════════
@@ -384,38 +511,40 @@ def run_scan():
 # ══════════════════════════════════════════════
 @app.route("/")
 def index():
-    return jsonify({"status": "ok", "message": "S&P 500 Bot is running 🚀"})
+    return jsonify({
+        "status": "ok", "version": "v2-strict",
+        "filters": {
+            "layer1_trend":   "price > EMA20 > EMA50 > EMA200",
+            "layer1_slope":   f"EMA50 slope >= {MIN_EMA50_SLOPE}%",
+            "layer1_adx":     f">= {MIN_ADX}",
+            "layer2_rsi":     f"{RSI_LOW}–{RSI_HIGH}",
+            "layer2_macd":    "histogram > 0",
+            "layer3_volume":  f">= {MIN_AVG_VOLUME/1e6:.0f}M",
+            "min_score":      f"{MIN_SCORE}/10",
+        }
+    })
 
 
 @app.route("/trigger")
 def trigger():
-    """
-    Endpoint ที่ cron-job.org จะเรียกทุกวัน
-    ตอบกลับทันที แล้วโยนงานไปทำ Background
-    """
-    # ตรวจสอบ config เบื้องต้น
-    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID or not HF_API_TOKEN:
-        missing = []
-        if not TELEGRAM_BOT_TOKEN: missing.append("TELEGRAM_BOT_TOKEN")
-        if not TELEGRAM_CHAT_ID:   missing.append("TELEGRAM_CHAT_ID")
-        if not HF_API_TOKEN:       missing.append("HF_API_TOKEN")
-        return jsonify({
-            "status": "error",
-            "message": f"Environment variables ขาด: {', '.join(missing)}"
-        }), 500
+    missing = [k for k, v in {
+        "TELEGRAM_BOT_TOKEN": TELEGRAM_BOT_TOKEN,
+        "TELEGRAM_CHAT_ID":   TELEGRAM_CHAT_ID,
+        "HF_API_TOKEN":       HF_API_TOKEN,
+    }.items() if not v]
+    if missing:
+        return jsonify({"status": "error", "missing": missing}), 500
 
-    thread = threading.Thread(target=run_scan, daemon=True)
-    thread.start()
-
+    threading.Thread(target=run_scan, daemon=True).start()
     return jsonify({
         "status": "accepted",
-        "message": "เริ่มสแกนแล้ว! ผลจะส่งเข้า Telegram เมื่อเสร็จ 🔍"
+        "message": "STRICT SCANNER v2 เริ่มสแกนแล้ว 🔍",
+        "filters": f"Score>={MIN_SCORE} | ADX>{MIN_ADX} | RSI {RSI_LOW}–{RSI_HIGH}",
     })
 
 
 @app.route("/health")
 def health():
-    """Health check สำหรับ Render"""
     return jsonify({"status": "healthy"})
 
 
