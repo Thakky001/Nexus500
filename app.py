@@ -69,6 +69,9 @@ MIN_5D_MOMENTUM   = -5.0    # ยอมรับการย่อตัวร�
 # ── Scoring: ส่ง Telegram เฉพาะ Score >= N ──
 MIN_SCORE         = 6       # เกณฑ์ผ่าน (max = 10)
 
+# ── Top N: คัดสุดท้ายเหลือกี่ตัว ─────────────
+TOP_N             = 5       # แสดงเฉพาะ Top 5 (จัดอันดับจาก Composite Score)
+
 # ── Rate Limit Protection ────────────────────
 CHUNK_SIZE        = 50
 CHUNK_PAUSE       = 10
@@ -396,15 +399,18 @@ def score_bar(score: int) -> str:
     return f"{'█' * score}{'░' * (10 - score)} {score}/10"
 
 
-def build_message(stock: dict, headlines: list, confidence: float) -> str:
+def build_message(stock: dict, headlines: list, confidence: float, rank: int = 0) -> str:
     s   = stock["score"]
     t   = stock["ticker"]
     bar = score_bar(s)
 
-    if s >= 9:   badge = "🏆 ELITE"
-    elif s >= 8: badge = "🥇 STRONG"
-    elif s >= 7: badge = "🥈 GOOD"
-    else:        badge = "🥉 WATCH"
+    rank_medals = {1: "🥇", 2: "🥈", 3: "🥉", 4: "4️⃣", 5: "5️⃣"}
+    rank_label  = f"  #{rank} TODAY'S TOP" if rank else ""
+
+    if s >= 9:   badge = f"🏆 ELITE{rank_label}"
+    elif s >= 8: badge = f"🥇 STRONG{rank_label}"
+    elif s >= 7: badge = f"🥈 GOOD{rank_label}"
+    else:        badge = f"🥉 WATCH{rank_label}"
 
     bonuses = []
     if stock.get("bonus_adx"):       bonuses.append("⚡ ADX มีเทรนด์แข็งแกร่ง")
@@ -415,6 +421,7 @@ def build_message(stock: dict, headlines: list, confidence: float) -> str:
 
     news_lines = "".join(f"  {i}. {h}\n" for i, h in enumerate(headlines, 1))
     conf_pct   = f"{confidence*100:.0f}%"
+    composite  = round(stock["score"] + confidence, 2)
 
     # ดึงค่า Entry
     ecurrent = stock["entry_current"]
@@ -443,6 +450,9 @@ def build_message(stock: dict, headlines: list, confidence: float) -> str:
         f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
         f"📰 <b>ข่าว (🟢 Positive {conf_pct})</b>\n"
         f"{news_lines}"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"⭐ <b>Composite Score</b>: {composite:.2f}  "
+        f"<i>(Tech {stock['score']}/10 + Sentiment {conf_pct})</i>\n"
     )
 
 
@@ -469,6 +479,9 @@ def run_scan():
         )
         return
 
+    # ── รวบรวม Positive results พร้อม Composite Score ──────────────────────
+    # Composite Score = Technical Score (0-10) + Sentiment Confidence (0-1)
+    # ทำให้ข่าวดีมาก (confidence 0.95) มีน้ำหนักเหนือกว่าข่าวดีพอใช้ (0.60)
     positive_results = []
     for stock in candidates:
         ticker = stock["ticker"]
@@ -487,7 +500,9 @@ def run_scan():
         log.info(f"  {ticker}: {label} ({confidence*100:.0f}%)")
 
         if label == "positive":
-            positive_results.append((stock, headlines, confidence))
+            # Composite = technical score + sentiment bonus (max ~11)
+            composite = stock["score"] + confidence
+            positive_results.append((stock, headlines, confidence, composite))
 
     if not positive_results:
         send_telegram(
@@ -497,22 +512,47 @@ def run_scan():
         )
         return
 
-    # ── Summary ──
+    # ── จัดอันดับด้วย Composite Score แล้วตัดเหลือ Top N ───────────────────
+    positive_results.sort(key=lambda x: x[3], reverse=True)
+    top_results  = positive_results[:TOP_N]
+    total_passed = len(positive_results)
+
+    # ── Summary Leaderboard Message ────────────────────────────────────────
+    rank_medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣"]
+    summary_rows = ""
+    for rank, (stock, headlines, confidence, composite) in enumerate(top_results):
+        medal    = rank_medals[rank] if rank < len(rank_medals) else f"{rank+1}."
+        sent_pct = f"{confidence*100:.0f}%"
+        summary_rows += (
+            f"{medal} <b>${stock['ticker']}</b>  "
+            f"Tech:{stock['score']}/10  Sentiment:{sent_pct}\n"
+            f"    RSI {stock['rsi']} | ADX {stock['adx']} | "
+            f"ห่าง 52W -{stock['pct_from_52w']:.1f}%\n"
+        )
+
     send_telegram(
-        f"🚨 <b>S&P 500 LONG-TERM SCAN</b> 🚨\n"
-        f"พบหุ้นน่าสะสม <b>{len(positive_results)} ตัว</b>\n"
-        f"(จาก {len(candidates)} ตัวผ่านเกณฑ์ / Score>={MIN_SCORE})\n"
+        f"🚨 <b>S&P 500 LONG-TERM SCAN — TOP {TOP_N}</b> 🚨\n"
+        f"จากหุ้น Positive ทั้งหมด {total_passed} ตัว "
+        f"(ผ่านเกณฑ์กราฟ {len(candidates)} ตัว)\n"
+        f"<i>จัดอันดับจาก Technical Score + Sentiment Confidence</i>\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"🏆 ≥9  🥇 ≥8  🥈 ≥7  🥉 ≥6"
+        f"{summary_rows}"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"🏆 ≥9  🥇 ≥8  🥈 ≥7  🥉 ≥6  (Technical Score)"
     )
     time.sleep(2)
 
-    for stock, headlines, confidence in positive_results:
-        ok = send_telegram(build_message(stock, headlines, confidence))
-        log.info(f"ส่ง {stock['ticker']} Score:{stock['score']} → {'✅' if ok else '❌'}")
+    # ── ส่งรายละเอียดแต่ละตัว ──────────────────────────────────────────────
+    for rank, (stock, headlines, confidence, composite) in enumerate(top_results):
+        ok = send_telegram(build_message(stock, headlines, confidence, rank + 1))
+        log.info(
+            f"ส่ง #{rank+1} {stock['ticker']} "
+            f"Tech:{stock['score']} Sent:{confidence*100:.0f}% Composite:{composite:.2f} "
+            f"→ {'✅' if ok else '❌'}"
+        )
         time.sleep(3)
 
-    log.info(f"  เสร็จสิ้น! ส่งทั้งหมด {len(positive_results)} ตัว")
+    log.info(f"  เสร็จสิ้น! ส่ง Top {len(top_results)} จาก {total_passed} ตัว Positive")
 
 
 # ══════════════════════════════════════════════
