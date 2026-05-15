@@ -189,8 +189,17 @@ def read_sheet_data(limit: int = 200) -> list:
         return []
     try:
         all_rows = ws.get_all_records()
-        # เรียงล่าสุดก่อน
-        all_rows.reverse()
+        # เรียงวันที่ล่าสุดก่อน แต่ภายในวันเดียวกันให้เรียง rank 1→5
+        all_rows.sort(key=lambda r: (r.get("date", ""), int(r.get("rank", 99))), reverse=False)
+        # แยกกลุ่มวันแล้ว reverse เฉพาะลำดับวัน (ล่าสุดขึ้นก่อน) โดยคง rank ไว้
+        dates_seen = []
+        for r in all_rows:
+            d = r.get("date", "")
+            if d not in dates_seen:
+                dates_seen.append(d)
+        dates_seen.reverse()  # วันล่าสุดก่อน
+        date_order = {d: i for i, d in enumerate(dates_seen)}
+        all_rows.sort(key=lambda r: (date_order.get(r.get("date", ""), 999), int(r.get("rank", 99))))
         return all_rows[:limit]
     except Exception as e:
         log.error(f"อ่าน Google Sheets ล้มเหลว: {e}")
@@ -1079,8 +1088,12 @@ function applyFilters() {
   const multiplier = sortDir === 'desc' ? -1 : 1;
   data.sort((a, b) => {
     let av = a[sortCol], bv = b[sortCol];
-    if (typeof av === 'string') return av.localeCompare(bv) * multiplier;
-    return (av - bv) * multiplier;
+    let cmp;
+    if (typeof av === 'string') cmp = av.localeCompare(bv) * multiplier;
+    else cmp = (av - bv) * multiplier;
+    // secondary sort: ถ้า primary เท่ากัน ให้เรียง rank 1→5 เสมอ
+    if (cmp === 0) return (a.rank || 0) - (b.rank || 0);
+    return cmp;
   });
 
   renderTable(data);

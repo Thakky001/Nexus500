@@ -1,25 +1,48 @@
-# 📖 คู่มือ S&P 500 Scanner Bot — ฉบับสมบูรณ์
+# 📖 คู่มือ S&P 500 Long-Term Scanner Bot — ฉบับสมบูรณ์
 
-> **ระบบสแกนหุ้น S&P 500 อัตโนมัติ** • แจ้งเตือนผ่าน Telegram ทุกวัน  
+> **ระบบสแกนหุ้น S&P 500 อัตโนมัติ** เน้นการลงทุนระยะยาว / DCA สะสมหุ้น  
+> แจ้งเตือนผ่าน Telegram • บันทึกประวัติลง Google Sheets • Web Dashboard  
 > ใช้งานฟรี 100% บน Render.com + Hugging Face + cron-job.org
 
 ---
 
-## สิ่งที่ระบบทำ (ทุกวันจันทร์–ศุกร์ เวลา 18:00)
+## ภาพรวมระบบ
 
 ```
 Wikipedia → รายชื่อหุ้น S&P 500 (~503 ตัว)
     ↓
 yfinance → กราฟย้อนหลัง 1 ปี (ทีละ 50 ตัว)
     ↓
-คัดกรอง: Volume > 1M │ ราคา > EMA50 > EMA200 │ RSI 45–65
+คัดกรอง 4 ชั้น + Scoring (0–10):
+  ชั้น 1 — Trend    : price > EMA20 > EMA50 > EMA200 + ADX ≥ 20
+  ชั้น 2 — Momentum : RSI 40–70 + MACD Histogram > -0.5
+  ชั้น 3 — Volume   : Avg Volume (20d) ≥ 2M
+  ชั้น 4 — Structure: ห่างจาก 52W High ≤ 20% + Momentum 5 วัน ≥ -5%
+    ↓
+เฉพาะหุ้นที่ Score ≥ 6/10 เท่านั้นผ่าน
     ↓
 Yahoo Finance RSS → ข่าวล่าสุด 3 ข่าว
     ↓
 FinBERT (HuggingFace) → วิเคราะห์ Sentiment
     ↓
-Telegram Channel → แจ้งเตือนเฉพาะข่าว "Positive" 📬
+เฉพาะ "Positive" → จัดอันดับ Composite Score (Tech + Sentiment)
+    ↓
+ส่ง Top 5 เข้า Telegram + บันทึกลง Google Sheets
 ```
+
+---
+
+## Environment Variables ที่ต้องตั้งค่า (5 ตัว)
+
+| ตัวแปร                        | คำอธิบาย                                        | จำเป็น |
+| ----------------------------- | ----------------------------------------------- | ------ |
+| `TELEGRAM_BOT_TOKEN`          | Token จาก @BotFather                            | ✅     |
+| `TELEGRAM_CHAT_ID`            | Chat ID ของ Channel (เช่น `-1001234567890`)     | ✅     |
+| `HF_API_TOKEN`                | Hugging Face API Token                          | ✅     |
+| `GOOGLE_SHEET_ID`             | ID ของ Google Sheet (จาก URL)                   | แนะนำ  |
+| `GOOGLE_SERVICE_ACCOUNT_JSON` | JSON ทั้งหมดของ Service Account (inline string) | แนะนำ  |
+
+> ⚠️ สองตัวสุดท้ายไม่ใส่ก็ได้ ระบบจะยังทำงานได้ แต่จะไม่มีประวัติใน Google Sheets และ Web Dashboard จะว่างเปล่า
 
 ---
 
@@ -27,117 +50,167 @@ Telegram Channel → แจ้งเตือนเฉพาะข่าว "Pos
 
 ### 1.1 สร้าง Bot
 
-1. เปิด Telegram ค้นหา **@BotFather**
-2. พิมพ์ `/newbot`
-3. ตั้งชื่อ Bot (ชื่อที่แสดง) เช่น `SP500 Scanner`
-4. ตั้ง username (ลงท้าย `bot`) เช่น `my_sp500_bot`
-5. คัดลอก **Bot Token** ที่ได้มาเก็บไว้ รูปแบบ: `1234567890:ABCdef...`
+1. เปิด Telegram → ค้นหา **@BotFather** → กดเริ่มสนทนา
+2. พิมพ์ `/newbot` แล้วกด Send
+3. ตั้งชื่อที่แสดง (Display Name) เช่น `SP500 Scanner`
+4. ตั้ง username ต้องลงท้ายด้วย `bot` เช่น `my_sp500_bot`
+5. BotFather จะส่ง **Bot Token** กลับมา — คัดลอกเก็บไว้
+
+```
+รูปแบบ Token: 1234567890:ABCdefGHIjklMNOpqrSTUvwxYZ
+```
 
 ### 1.2 สร้าง Channel
 
-1. กดปุ่ม **New Channel** ใน Telegram
-2. ตั้งชื่อ Channel เช่น `SP500 Daily Scan`
-3. เลือกประเภท **Private**
-4. เข้า Channel Settings → **Restrict Saving Content** → เปิด ✅
+1. ใน Telegram กดไอคอนดินสอ (เขียนข้อความใหม่) → **New Channel**
+2. ตั้งชื่อ เช่น `SP500 Daily Scan`
+3. เลือกประเภท **Private** (แนะนำ เพื่อความปลอดภัย)
+4. ข้ามขั้นตอนเพิ่มสมาชิก → กด Done
 
-### 1.3 เชื่อม Bot เข้า Channel
+### 1.3 เพิ่ม Bot เป็น Admin ใน Channel
 
-1. เข้า Channel → กด ชื่อ Channel ด้านบน → **Administrators**
-2. กด **Add Administrator**
-3. ค้นหาชื่อ Bot ที่สร้างไว้ → เพิ่มเป็น Admin
-4. ให้สิทธิ์อย่างน้อย **Post Messages**
+1. เข้าไปใน Channel ที่เพิ่งสร้าง
+2. กดชื่อ Channel ด้านบน → **Administrators** → **Add Administrator**
+3. ค้นหา username ของ Bot ที่สร้างไว้ → เลือก → ให้สิทธิ์ **Post Messages** → กด Done
 
-### 1.4 หา Chat ID
+### 1.4 หา Chat ID ของ Channel
 
-1. พิมพ์ข้อความอะไรก็ได้ใน Channel (อย่างน้อย 1 ข้อความ)
-2. เปิดเบราว์เซอร์แล้วไปที่ URL นี้ (แทน `TOKEN` ด้วย Token จริง):
+**วิธีที่ 1 (ง่ายที่สุด)**
+
+1. ส่งข้อความอะไรก็ได้เข้า Channel ก่อน 1 ข้อความ
+2. เปิดเบราว์เซอร์แล้วไปที่:
 
 ```
 https://api.telegram.org/bot<TOKEN>/getUpdates
 ```
 
-3. มองหาข้อความนี้ใน JSON:
+(แทน `<TOKEN>` ด้วย Token จริงของคุณ)
+
+3. ดูในผลลัพธ์ JSON หาส่วนนี้:
 
 ```json
 "chat": {
-  "id": -1001234567890,   <-- นี่คือ Chat ID ของคุณ
+  "id": -1001234567890,
   "type": "channel"
 }
 ```
 
-4. คัดลอกตัวเลขทั้งหมดรวมเครื่องหมาย `-` ไว้ด้วย
+4. คัดลอกตัวเลขทั้งหมด **รวมเครื่องหมาย `-`** ด้านหน้า
 
-> **หมายเหตุ:** ถ้าไม่เห็น updates ให้ลองพิมพ์ข้อความใน Channel อีกครั้ง
+**วิธีที่ 2 (กรณีหา Chat ID ไม่เจอ)**
 
----
+เพิ่ม Bot `@userinfobot` เข้า Channel ชั่วคราว → มันจะแสดง Chat ID โดยอัตโนมัติ → ลบออกได้เลยหลังจากนั้น
 
-## Phase 2 — เตรียมไฟล์โค้ด
-
-ไฟล์ที่ต้องมี 2 ไฟล์:
-
-```
-sp500-bot/
-├── app.py              ← โค้ดหลัก
-└── requirements.txt    ← รายชื่อ Library
-```
-
-### ไฟล์ `requirements.txt`
-
-```
-flask>=3.0.0
-yfinance>=0.2.40
-pandas>=2.0.0
-pandas-ta>=0.3.14b
-requests>=2.31.0
-lxml>=5.0.0
-numpy>=1.26.0
-gunicorn>=21.2.0
-```
-
-### ไฟล์ `app.py`
-
-ใช้ไฟล์ `app.py` ที่แนบมาพร้อมคู่มือนี้ได้เลย
+> ✅ Chat ID ของ Channel จะขึ้นต้นด้วย `-100` เสมอ
 
 ---
 
-## Phase 3 — ขอ Hugging Face API Token
+## Phase 2 — ขอ Hugging Face API Token
 
-1. ไปที่ [https://huggingface.co](https://huggingface.co) → สมัครสมาชิก (ฟรี)
-2. คลิกรูปโปรไฟล์ด้านบนขวา → **Settings**
-3. เมนูซ้าย → **Access Tokens**
-4. กด **New token** → ตั้งชื่อ → Role: **Read**
-5. คัดลอก Token ที่ได้ไว้ รูปแบบ: `hf_xxxxxxxxxxxx`
+ระบบใช้โมเดล **FinBERT** วิเคราะห์ Sentiment ของข่าวหุ้น ซึ่งต้องใช้ API Token
+
+1. ไปที่ [https://huggingface.co](https://huggingface.co) → **Sign Up** (ฟรี)
+2. คลิกรูปโปรไฟล์มุมบนขวา → **Settings**
+3. เมนูด้านซ้าย → **Access Tokens**
+4. กด **New token**
+   - Name: ตั้งชื่ออะไรก็ได้ เช่น `sp500-bot`
+   - Role: เลือก **Read**
+5. กด **Generate a token**
+6. คัดลอก Token ที่ได้เก็บไว้ทันที (จะแสดงแค่ครั้งเดียว)
+
+```
+รูปแบบ Token: hf_xxxxxxxxxxxxxxxxxxxx
+```
 
 ---
 
-## Phase 4 — ฝากโค้ดขึ้น GitHub
+## Phase 3 — ตั้งค่า Google Sheets (สำหรับเก็บประวัติ)
+
+> ถ้าไม่ต้องการเก็บประวัติ ข้ามไป Phase 4 ได้เลย
+
+### 3.1 สร้าง Google Sheet
+
+1. ไปที่ [https://sheets.google.com](https://sheets.google.com) → **+ Blank spreadsheet**
+2. ตั้งชื่อ เช่น `SP500 Scanner History`
+3. ดู URL ของ Sheet — คัดลอกส่วนที่เป็น **Sheet ID**:
+
+```
+https://docs.google.com/spreadsheets/d/  [SHEET_ID_อยู่ตรงนี้]  /edit
+```
+
+ตัวอย่าง: `1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms`
+
+### 3.2 สร้าง Service Account
+
+1. ไปที่ [https://console.cloud.google.com](https://console.cloud.google.com)
+2. สร้าง Project ใหม่ (กด **New Project** → ตั้งชื่อ → กด **Create**)
+3. เปิดใช้งาน Google Sheets API:
+   - ค้นหา "Google Sheets API" → กด **Enable**
+   - ค้นหา "Google Drive API" → กด **Enable** ด้วย
+4. สร้าง Service Account:
+   - ไปที่ **IAM & Admin** → **Service Accounts** → **+ Create Service Account**
+   - ตั้งชื่อ เช่น `sp500-scanner`
+   - กด **Create and Continue** → **Done**
+5. ดาวน์โหลด JSON Key:
+   - คลิกที่ Service Account ที่เพิ่งสร้าง
+   - แท็บ **Keys** → **Add Key** → **Create new key** → เลือก **JSON** → **Create**
+   - ไฟล์ `.json` จะถูกดาวน์โหลดมา — **อย่าแชร์ไฟล์นี้กับใคร**
+
+### 3.3 แชร์ Google Sheet ให้ Service Account
+
+1. เปิดไฟล์ JSON ที่ดาวน์โหลดมา → หาค่า `client_email` เช่น:
+   ```
+   sp500-scanner@your-project.iam.gserviceaccount.com
+   ```
+2. กลับไปที่ Google Sheet → กดปุ่ม **Share** มุมบนขวา
+3. ใส่ `client_email` ด้านบน → เลือกสิทธิ์เป็น **Editor** → กด **Send**
+
+### 3.4 เตรียม JSON สำหรับ Environment Variable
+
+เปิดไฟล์ JSON → **คัดลอกเนื้อหาทั้งหมด** (ทั้งไฟล์) เก็บไว้ จะนำไปใส่เป็น `GOOGLE_SERVICE_ACCOUNT_JSON` ใน Render
+
+> ⚠️ JSON ต้องอยู่ในบรรทัดเดียว (Render จัดการให้อัตโนมัติเมื่อวางลงในช่อง Environment Variable)
+
+---
+
+## Phase 4 — อัปโหลดโค้ดขึ้น GitHub
 
 ### 4.1 สมัคร GitHub (ถ้ายังไม่มี)
 
-ไปที่ [https://github.com](https://github.com) → Sign up (ฟรี)
+ไปที่ [https://github.com](https://github.com) → **Sign up** (ฟรี)
 
-### 4.2 สร้าง Repository
+### 4.2 สร้าง Repository ใหม่
 
-1. กดปุ่ม **+** บน GitHub → **New repository**
-2. ตั้งชื่อ: `sp500-bot`
-3. เลือก **Private** (ปลอดภัยกว่า)
-4. กด **Create repository**
+1. กดปุ่ม **+** มุมบนขวา → **New repository**
+2. ตั้งค่าดังนี้:
+   - Repository name: `sp500-bot`
+   - Visibility: **Private** (แนะนำ เพื่อปกป้องโค้ด)
+   - ไม่ต้องติ๊กอะไรเพิ่ม
+3. กด **Create repository**
 
 ### 4.3 อัปโหลดไฟล์
 
-**วิธีที่ 1 — ผ่านเว็บ GitHub (ง่ายที่สุด)**
+ต้องการ 2 ไฟล์:
 
-1. คลิก **Add file** → **Upload files**
-2. ลากไฟล์ `app.py` และ `requirements.txt` ขึ้นไป
-3. กด **Commit changes**
+```
+sp500-bot/
+├── app.py
+└── requirements.txt
+```
 
-**วิธีที่ 2 — ผ่าน Command Line (ถ้ามี Git)**
+**วิธีผ่านเว็บ GitHub (ไม่ต้องติดตั้งอะไร)**
+
+1. ใน Repository ที่สร้าง → กด **Add file** → **Upload files**
+2. ลากไฟล์ทั้งสองขึ้นไป หรือกด **choose your files** แล้วเลือก
+3. เลื่อนลงไปข้างล่าง → กด **Commit changes**
+
+**วิธีผ่าน Command Line (ถ้ามี Git ติดตั้งแล้ว)**
 
 ```bash
 git init
 git add app.py requirements.txt
 git commit -m "initial commit"
-git remote add origin https://github.com/USERNAME/sp500-bot.git
+git remote add origin https://github.com/YOUR_USERNAME/sp500-bot.git
 git push -u origin main
 ```
 
@@ -145,188 +218,347 @@ git push -u origin main
 
 ## Phase 5 — Deploy บน Render.com
 
-### 5.1 สมัครและสร้าง Web Service
+### 5.1 สมัครและเชื่อม GitHub
 
-1. ไปที่ [https://render.com](https://render.com) → Sign up ด้วย GitHub Account
-2. กด **New +** → **Web Service**
-3. เลือก **Connect a repository** → เชื่อมกับ GitHub
-4. เลือก Repository `sp500-bot`
+1. ไปที่ [https://render.com](https://render.com) → **Get Started for Free**
+2. เลือก **Sign up with GitHub** (สะดวกที่สุด)
+3. อนุญาต Render เข้าถึง GitHub Account
 
-### 5.2 ตั้งค่า Build
+### 5.2 สร้าง Web Service
 
-| Field             | ค่าที่ต้องใส่                     |
+1. หลัง Login → กด **New +** → **Web Service**
+2. เลือก **Build and deploy from a Git repository**
+3. กด **Connect** ที่ Repository `sp500-bot`
+
+### 5.3 ตั้งค่า Build
+
+กรอกข้อมูลดังนี้ (ช่องอื่นที่ไม่ได้ระบุให้ปล่อยเป็นค่าเริ่มต้น):
+
+| ฟิลด์             | ค่าที่ต้องใส่                     |
 | ----------------- | --------------------------------- |
-| **Name**          | sp500-bot (หรือชื่ออื่น)          |
+| **Name**          | `sp500-bot` (หรือชื่ออื่น)        |
+| **Region**        | Singapore (ใกล้ไทยที่สุด)         |
 | **Runtime**       | Python 3                          |
 | **Build Command** | `pip install -r requirements.txt` |
 | **Start Command** | `gunicorn app:app`                |
 | **Instance Type** | Free                              |
 
-### 5.3 ใส่ Environment Variables
+### 5.4 ใส่ Environment Variables
 
-กด **Environment** → **Add Environment Variable** แล้วใส่ทีละตัว:
+เลื่อนลงไปที่ส่วน **Environment Variables** → กด **Add Environment Variable** ทีละตัว:
 
-| Key                  | Value                                       |
-| -------------------- | ------------------------------------------- |
-| `TELEGRAM_BOT_TOKEN` | Token จาก @BotFather                        |
-| `TELEGRAM_CHAT_ID`   | Chat ID ของ Channel (เช่น `-1001234567890`) |
-| `HF_API_TOKEN`       | Token จาก Hugging Face                      |
+| Key                           | Value                                           |
+| ----------------------------- | ----------------------------------------------- |
+| `TELEGRAM_BOT_TOKEN`          | Token จาก @BotFather                            |
+| `TELEGRAM_CHAT_ID`            | Chat ID ของ Channel เช่น `-1001234567890`       |
+| `HF_API_TOKEN`                | Token จาก Hugging Face                          |
+| `GOOGLE_SHEET_ID`             | ID ของ Google Sheet (ถ้าตั้งค่าไว้)             |
+| `GOOGLE_SERVICE_ACCOUNT_JSON` | JSON ทั้งหมดของ Service Account (ถ้าตั้งค่าไว้) |
 
-> ⚠️ **สำคัญ:** อย่าใส่ค่าเหล่านี้ในโค้ดโดยตรง ใส่ใน Environment Variables เท่านั้น
+> ⚠️ **สำคัญมาก:** อย่าใส่ค่าเหล่านี้ในไฟล์โค้ดโดยตรง ใส่ใน Environment Variables เท่านั้น
 
-### 5.4 Deploy
+### 5.5 Deploy
 
-1. กด **Create Web Service**
-2. รอ Deploy เสร็จ (ประมาณ 2–5 นาที)
-3. เมื่อสถานะเป็น **Live** จะได้ URL มา เช่น:
-   ```
-   https://sp500-bot.onrender.com
-   ```
+1. เลื่อนลงข้างล่างสุด → กด **Create Web Service**
+2. รอ Build เสร็จ (ประมาณ 3–7 นาที) — ดู Log ด้านขวาได้
+3. เมื่อสถานะเป็น **Live 🟢** จะได้ URL มา เช่น:
 
-### 5.5 ทดสอบ
+```
+https://sp500-bot.onrender.com
+```
 
-เปิดเบราว์เซอร์ไปที่:
+### 5.6 ทดสอบระบบ
+
+**ทดสอบว่าเซิร์ฟเวอร์ทำงาน:**
+
+เปิดเบราว์เซอร์ → ไปที่:
+
+```
+https://sp500-bot.onrender.com/health
+```
+
+ควรได้:
+
+```json
+{
+  "status": "healthy",
+  "google_sheets": "configured"
+}
+```
+
+**ทดสอบสแกนจริง:**
+
+ไปที่:
 
 ```
 https://sp500-bot.onrender.com/trigger
 ```
 
-ถ้าได้ response แบบนี้ = สำเร็จ ✅
+ควรได้:
 
 ```json
 {
   "status": "accepted",
-  "message": "เริ่มสแกนแล้ว! ผลจะส่งเข้า Telegram เมื่อเสร็จ"
+  "message": "LONG-TERM SCANNER เริ่มสแกนแล้ว 🔍",
+  "filters": "Score>=6 | ADX>20 | RSI 40–70"
 }
 ```
 
-รอประมาณ **20–40 นาที** แล้วตรวจดูใน Telegram Channel
+จากนั้นรอประมาณ **20–40 นาที** แล้วตรวจดูใน Telegram Channel
+
+**ดู Web Dashboard:**
+
+ไปที่:
+
+```
+https://sp500-bot.onrender.com/
+```
+
+จะเห็น Dashboard แสดงประวัติการสแกนทั้งหมดจาก Google Sheets
 
 ---
 
 ## Phase 6 — ตั้งเวลาอัตโนมัติด้วย cron-job.org
 
-1. ไปที่ [https://cron-job.org](https://cron-job.org) → สมัครฟรี
-2. กด **CREATE CRONJOB**
-3. ตั้งค่าดังนี้:
+### 6.1 สมัครและสร้าง Cronjob
 
-| Field        | ค่าที่ต้องใส่                            |
+1. ไปที่ [https://cron-job.org](https://cron-job.org) → **Sign up** (ฟรี)
+2. Verify email → Login
+3. กด **CREATE CRONJOB**
+
+### 6.2 ตั้งค่า Cronjob
+
+| ฟิลด์        | ค่าที่ต้องใส่                            |
 | ------------ | ---------------------------------------- |
-| **Title**    | SP500 Bot Daily Trigger                  |
+| **Title**    | `SP500 Bot Daily Trigger`                |
 | **URL**      | `https://sp500-bot.onrender.com/trigger` |
-| **Schedule** | Custom — ดูด้านล่าง                      |
+| **Schedule** | Custom (ดูด้านล่าง)                      |
 
-4. ตั้ง Schedule แบบ Custom:
+### 6.3 ตั้ง Schedule แบบ Custom
+
+กดที่ **Custom** แล้วใส่ค่า:
 
 ```
-# ทำงานทุกวันจันทร์–ศุกร์ เวลา 11:00 UTC (= 18:00 เวลาไทย)
-นาที: 0
-ชั่วโมง: 11
-วันในเดือน: *
-เดือน: *
-วันในสัปดาห์: 1-5
+นาที        : 0
+ชั่วโมง      : 11
+วันในเดือน   : *  (ทุกวัน)
+เดือน        : *  (ทุกเดือน)
+วันในสัปดาห์ : 1-5  (จันทร์–ศุกร์)
 ```
 
-> 💡 **เวลาไทย (ICT) = UTC+7** ดังนั้น 18:00 ไทย = 11:00 UTC
+> 💡 เวลาไทย (ICT) = UTC+7 ดังนั้น **11:00 UTC = 18:00 เวลาไทย**
 
-5. กด **CREATE** — เสร็จสิ้น! 🎉
+### 6.4 ตั้งค่า Advanced (สำหรับ Render Free Tier)
+
+ใน cron-job.org → **Request settings**:
+
+- Request Timeout: **300 seconds** (5 นาที เผื่อ Server cold start)
+- Request Method: **GET**
+
+4. กด **CREATE** — เสร็จสิ้น! 🎉
 
 ---
 
 ## API Endpoints
 
-| Endpoint       | ความหมาย                          |
-| -------------- | --------------------------------- |
-| `GET /`        | ตรวจสอบว่า Bot ยังทำงานอยู่       |
-| `GET /trigger` | เริ่มสแกนหุ้น (เรียกโดย cron-job) |
-| `GET /health`  | Health check สำหรับ Render        |
+| Endpoint       | Method | ความหมาย                                        |
+| -------------- | ------ | ----------------------------------------------- |
+| `/`            | GET    | Web Dashboard แสดงประวัติการสแกน                |
+| `/trigger`     | GET    | เริ่มสแกนหุ้น (เรียกโดย cron-job)               |
+| `/health`      | GET    | ตรวจสอบสถานะระบบ + Google Sheets                |
+| `/api/history` | GET    | ดึงประวัติการสแกนเป็น JSON (สูงสุด 300 ระเบียน) |
+
+---
+
+## ระบบ Scoring (0–10 คะแนน)
+
+| เงื่อนไข                                     | คะแนน       | หมายเหตุ                              |
+| -------------------------------------------- | ----------- | ------------------------------------- |
+| ผ่าน Trend (EMA Stack + EMA50 Slope)         | +2          | **บังคับ** ถ้าไม่ผ่านจะถูกตัดออกทันที |
+| ADX ≥ 20                                     | รวมใน Trend | **บังคับ**                            |
+| ADX ≥ 30 (เทรนด์แข็ง)                        | +1 Bonus    |                                       |
+| ผ่าน Momentum (RSI + MACD)                   | +2          | **บังคับ**                            |
+| RSI อยู่ในโซน 40–55 (โซนเก็บของ)             | +1 Bonus    |                                       |
+| ผ่าน Volume (Avg Vol ≥ 2M)                   | +2          | **บังคับ**                            |
+| Vol วันนี้ ≥ 1.5x ค่าเฉลี่ย (แรงซื้อผิดปกติ) | +1 Bonus    |                                       |
+| ราคาห่างจาก 52W High ≤ 20%                   | +1          |                                       |
+| Momentum 5 วัน ≥ -5%                         | +1          |                                       |
+| **คะแนนรวมสูงสุด**                           | **10**      | ต้องได้ ≥ 6 จึงผ่าน                   |
+
+**เกณฑ์ Badge:**
+
+| Badge     | คะแนน |
+| --------- | ----- |
+| 🏆 ELITE  | 9–10  |
+| 🥇 STRONG | 8     |
+| 🥈 GOOD   | 7     |
+| 🥉 WATCH  | 6     |
 
 ---
 
 ## ตัวอย่างข้อความที่จะได้รับใน Telegram
 
-```
-🚨 S&P 500 Daily Scan 🚨
-พบหุ้นน่าสนใจ 3 ตัว (จาก 47 ตัวที่ผ่านเกณฑ์กราฟ)
-━━━━━━━━━━━━━━━━━━━━
+**ข้อความสรุป (ส่งก่อน):**
 
-📈 $AAPL  •  S&P 500 Scanner
-━━━━━━━━━━━━━━━━━━━━
-💲 ราคา:    $189.50
-📊 EMA 50:  $182.30
-📊 EMA 200: $171.20
-🔢 RSI (14): 58.3
-📦 Vol เฉลี่ย: 62.4M
-━━━━━━━━━━━━━━━━━━━━
-📰 ข่าวล่าสุด (Sentiment: 🟢 Positive)
-  1. Apple reports record Q4 earnings beating expectations
-  2. iPhone 17 pre-orders surge past analyst forecasts
+```
+🚨 S&P 500 LONG-TERM SCAN — TOP 5 🚨
+จากหุ้น Positive ทั้งหมด 12 ตัว (ผ่านเกณฑ์กราฟ 47 ตัว)
+จัดอันดับจาก Technical Score + Sentiment Confidence
+━━━━━━━━━━━━━━━━━━━━━━━━
+🥇 $AAPL  Tech:9/10  Sentiment:94%
+   RSI 52.3 | ADX 34.1 | ห่าง 52W -8.2%
+🥈 $MSFT  Tech:8/10  Sentiment:91%
+   RSI 48.7 | ADX 28.4 | ห่าง 52W -12.5%
+...
+━━━━━━━━━━━━━━━━━━━━━━━━
+🏆 ≥9  🥇 ≥8  🥈 ≥7  🥉 ≥6  (Technical Score)
+```
+
+**ข้อความรายหุ้น (ส่งแยกแต่ละตัว):**
+
+```
+📈 $AAPL  🏆 ELITE  #1 TODAY'S TOP (Long-term)
+██████████░ 9/10
+━━━━━━━━━━━━━━━━━━━━━━━━
+💲 ราคาปัจจุบัน  $189.50
+📊 EMA 20/50/200  $184.20 / $178.30 / $162.40
+━━━━━━━━━━━━━━━━━━━━━━━━
+🔢 RSI (14)     52.3
+📉 MACD Hist   +0.1234
+🏔 ห่าง 52W High -8.2%
+━━━━━━━━━━━━━━━━━━━━━━━━
+🎯 แผนการสะสม (Accumulation Zones)
+
+  ▶️ ไม้แรก (ราคาปัจจุบัน) : $189.50
+  ▶️ รอรับย่อ (EMA50)       : $178.30
+  ▶️ ไม้เผื่อ Panic (EMA200) : $162.40
+━━━━━━━━━━━━━━━━━━━━━━━━
+✨ Signals: ⚡ ADX มีเทรนด์แข็งแกร่ง  🏔 โครงสร้างราคายกตัว
+━━━━━━━━━━━━━━━━━━━━━━━━
+📰 ข่าว (🟢 Positive 94%)
+  1. Apple reports record Q4 earnings
+  2. iPhone 17 pre-orders surge past forecasts
   3. Apple Vision Pro gaining enterprise adoption
-━━━━━━━━━━━━━━━━━━━━
-⚠️ ข้อมูลนี้เพื่อการศึกษาเท่านั้น ไม่ใช่คำแนะนำการลงทุน
+━━━━━━━━━━━━━━━━━━━━━━━━
+⭐ Composite Score: 9.94  (Tech 9/10 + Sentiment 94%)
+```
+
+---
+
+## ปรับแต่งเพิ่มเติม
+
+แก้ค่าในส่วน Config ของ `app.py`:
+
+```python
+# ── ชั้น 1: Trend ──────────────────────────────
+MIN_ADX         = 20    # เพิ่มเป็น 25 ถ้าต้องการเทรนด์แข็งขึ้น
+EMA_SLOPE_DAYS  = 20    # จำนวนวันที่ใช้คำนวณ Slope ของ EMA50
+MIN_EMA50_SLOPE = 0.0   # เพิ่มเป็น 0.5 ถ้าต้องการ Slope ขาขึ้นชัดเจน
+
+# ── ชั้น 2: Momentum ───────────────────────────
+RSI_LOW         = 40    # ลดเป็น 35 ถ้าต้องการ Oversold มากขึ้น
+RSI_HIGH        = 70    # เพิ่มเป็น 75 ถ้ายอมรับ Overbought ได้
+MIN_MACD_HIST   = -0.5  # เพิ่มเป็น 0.0 ถ้าต้องการ MACD Positive เท่านั้น
+
+# ── ชั้น 3: Volume ─────────────────────────────
+MIN_AVG_VOLUME  = 2_000_000  # เพิ่มเป็น 5_000_000 สำหรับหุ้น Liquid สูง
+
+# ── ชั้น 4: Price Structure ────────────────────
+MAX_PCT_FROM_52W = 20.0  # ลดเป็น 10 ถ้าต้องการหุ้นใกล้ All-time High
+MIN_5D_MOMENTUM  = -5.0  # เพิ่มเป็น 0.0 ถ้าต้องการ Momentum บวกเท่านั้น
+
+# ── Scoring ────────────────────────────────────
+MIN_SCORE   = 6    # เพิ่มเป็น 7 ถ้าต้องการเกณฑ์เข้มข้นขึ้น
+TOP_N       = 5    # จำนวนหุ้นสูงสุดที่ส่งเข้า Telegram
+
+# ── Rate Limit ─────────────────────────────────
+CHUNK_SIZE  = 50   # ลดเป็น 30 ถ้าโดน Rate Limit บ่อย
 ```
 
 ---
 
 ## แก้ไขปัญหาที่พบบ่อย
 
-### ❓ เรียก `/trigger` แล้วได้ error เรื่อง Environment Variables
+### ❓ เรียก `/trigger` แล้วได้ error เรื่อง missing variables
 
-ตรวจสอบว่าใส่ค่าครบทุกตัวบน Render:
+```json
+{ "status": "error", "missing": ["TELEGRAM_BOT_TOKEN"] }
+```
 
-- `TELEGRAM_BOT_TOKEN`
-- `TELEGRAM_CHAT_ID`
-- `HF_API_TOKEN`
+→ ตรวจสอบว่าใส่ Environment Variables ครบ 3 ตัวหลักบน Render แล้ว Redeploy
+
+### ❓ `/health` แสดง `"google_sheets": "not configured"`
+
+→ ปกติ ถ้าไม่ได้ตั้งค่า `GOOGLE_SHEET_ID` และ `GOOGLE_SERVICE_ACCOUNT_JSON`  
+→ ถ้าตั้งค่าแล้วยังไม่ขึ้น ให้ตรวจสอบว่า JSON ถูกต้องและแชร์ Sheet ให้ Service Account แล้ว
 
 ### ❓ Bot ไม่ส่งข้อความเข้า Telegram
 
-1. ตรวจสอบว่า Bot เป็น Admin ใน Channel แล้ว
-2. ตรวจสอบว่า Chat ID ขึ้นต้นด้วย `-100`
-3. ลองทดสอบ Token โดยเปิดเบราว์เซอร์:
-   ```
-   https://api.telegram.org/bot<TOKEN>/getMe
-   ```
-   ถ้าได้ข้อมูล Bot กลับมา = Token ถูกต้อง
+ตรวจสอบตามลำดับ:
 
-### ❓ Render หยุดทำงานเองหลังไม่ได้ใช้งาน 15 นาที (Free Tier)
+1. ทดสอบ Token ที่เบราว์เซอร์: `https://api.telegram.org/bot<TOKEN>/getMe` — ถ้าเห็นข้อมูล Bot = Token ถูกต้อง
+2. ตรวจสอบว่า Bot เป็น Admin ใน Channel และมีสิทธิ์ Post Messages
+3. ตรวจสอบว่า Chat ID ขึ้นต้นด้วย `-100`
 
-ปกติของ Free Plan — cron-job.org จะ "ปลุก" เซิร์ฟเวอร์ทุกวัน ซึ่งใช้เวลาโหลดประมาณ 1–2 นาที แต่ระบบจะรอและทำงานต่อได้เอง
+### ❓ Render หยุดทำงานเองหลังไม่มีคนใช้ 15 นาที
 
-### ❓ FinBERT ตอบช้าหรือ Error ครั้งแรก
+ปกติของ Free Tier — เซิร์ฟเวอร์จะ "นอนหลับ" เมื่อไม่มีคน Request เข้ามา  
+cron-job.org จะ "ปลุก" ทุกวัน ซึ่งใช้เวลา cold start ~1–2 นาที → ระบบจะรอและทำงานต่อได้เองอัตโนมัติ
 
-โมเดลบน Hugging Face Free Tier จะ "cold start" เมื่อไม่ได้ใช้งานนาน โค้ดมีระบบ Retry อัตโนมัติอยู่แล้ว (ลองใหม่ 3 ครั้ง)
+### ❓ FinBERT ตอบช้าหรือ Error
 
-### ❓ ไม่มีหุ้นผ่านเกณฑ์เลย
+โมเดลบน Hugging Face Free Tier จะ cold start เมื่อไม่ได้ใช้งานนาน  
+โค้ดมีระบบ Retry อัตโนมัติ 3 ครั้ง (รอ 60 วินาทีระหว่างครั้ง) อยู่แล้ว
 
-อาจเป็นเพราะตลาดอยู่ในช่วง Downtrend หรือ RSI สูง/ต่ำเกินไป ซึ่งเป็นเรื่องปกติ Bot จะส่งข้อความแจ้งว่า "ไม่มีหุ้นผ่านเกณฑ์"
+### ❓ ไม่มีหุ้นผ่านเกณฑ์เลย หรือน้อยมาก
+
+เป็นเรื่องปกติในตลาด Downtrend หรือช่วงที่ Sentiment ไม่ดี  
+Bot จะส่งข้อความแจ้งว่า "ไม่มีหุ้นผ่านเกณฑ์" เข้า Telegram แทน
+
+### ❓ Google Sheets ไม่บันทึกข้อมูล
+
+1. ตรวจสอบว่า Sheet ID ถูกต้อง (คัดลอกจาก URL ตรงๆ)
+2. ตรวจสอบว่า Service Account Email ได้รับสิทธิ์ **Editor** ใน Sheet แล้ว
+3. ดู Log บน Render ในส่วน "บันทึก Google Sheets" เพื่อดู Error message
 
 ---
 
-## ปรับแต่งเพิ่มเติม (Optional)
+## โครงสร้างโค้ด `app.py`
 
-แก้ค่าใน `app.py` บรรทัด Config:
-
-```python
-MIN_VOLUME    = 1_000_000   # เพิ่มเป็น 5_000_000 ถ้าต้องการหุ้น Liquid สูง
-RSI_LOW       = 45          # ลดเป็น 40 ถ้าต้องการหุ้น Oversold มากขึ้น
-RSI_HIGH      = 65          # เพิ่มเป็น 70 ถ้าต้องการรับหุ้น Momentum สูง
-CHUNK_SIZE    = 50          # ลดเป็น 30 ถ้าโดน Rate Limit บ่อย
+```
+app.py
+├── Config          — ค่า Environment Variables + เกณฑ์คัดกรอง
+├── Google Sheets   — get_gsheet(), save_to_sheet(), read_sheet_data()
+├── Step 1          — get_sp500_tickers() → โหลดรายชื่อจาก Wikipedia
+├── Step 2          — score_stock() + fetch_and_filter() → คัดกรอง 4 ชั้น
+├── Step 3          — fetch_news() → Yahoo Finance RSS
+├── Step 4          — analyze_sentiment() → FinBERT API
+├── Step 5          — send_telegram() + build_message() → ส่งแจ้งเตือน
+├── run_scan()      — งานหลักที่รันใน Background Thread
+├── DASHBOARD_HTML  — HTML Web Dashboard (inline template)
+└── Flask Routes
+    ├── GET /          → Web Dashboard
+    ├── GET /trigger   → เริ่มสแกน
+    ├── GET /health    → ตรวจสอบสถานะ
+    └── GET /api/history → JSON API
 ```
 
 ---
 
-## ต้นทุน (ทุกอย่างฟรี)
+## ต้นทุน (ทั้งหมดฟรี)
 
-| บริการ       | แผน                  | ค่าใช้จ่าย   |
-| ------------ | -------------------- | ------------ |
-| GitHub       | Free                 | $0           |
-| Render.com   | Free (750 ชม./เดือน) | $0           |
-| Hugging Face | Free Inference API   | $0           |
-| cron-job.org | Free                 | $0           |
-| Telegram     | Free                 | $0           |
-| **รวม**      |                      | **$0/เดือน** |
+| บริการ        | แผน                    | ค่าใช้จ่าย   |
+| ------------- | ---------------------- | ------------ |
+| GitHub        | Free                   | $0           |
+| Render.com    | Free (750 ชม./เดือน)   | $0           |
+| Hugging Face  | Free Inference API     | $0           |
+| Google Sheets | Free (15 GB)           | $0           |
+| Google Cloud  | Free (Service Account) | $0           |
+| cron-job.org  | Free                   | $0           |
+| Telegram      | Free                   | $0           |
+| **รวม**       |                        | **$0/เดือน** |
 
 ---
 
 > ⚠️ **Disclaimer:** ข้อมูลที่ระบบสร้างขึ้นเป็นเพื่อการศึกษาและทดลองเท่านั้น  
-> ไม่ใช่คำแนะนำการลงทุน การลงทุนมีความเสี่ยง ผู้ลงทุนควรศึกษาข้อมูลเพิ่มเติมก่อนตัดสินใจ
+> ไม่ใช่คำแนะนำการลงทุน การลงทุนมีความเสี่ยง ผู้ลงทุนควรศึกษาข้อมูลเพิ่มเติมก่อนตัดสินใจเสมอ
