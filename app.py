@@ -316,7 +316,7 @@ def fetch_and_filter(tickers: list) -> list:
 # ══════════════════════════════════════════════
 #  STEP 3 — ดึงข่าว Yahoo Finance RSS
 # ══════════════════════════════════════════════
-def fetch_news(ticker: str, max_items: int = 3) -> list:
+def fetch_news(ticker: str, max_items: int = 5) -> list:
     url = f"https://feeds.finance.yahoo.com/rss/2.0/headline?s={ticker}&region=US&lang=en-US"
     headlines = []
     try:
@@ -371,32 +371,7 @@ def analyze_sentiment(headlines: list) -> tuple:
 # ══════════════════════════════════════════════
 #  STEP 5 — สร้างข้อความ + ส่ง Telegram
 # ══════════════════════════════════════════════
-def send_telegram(message: str) -> bool:
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    payload = {
-        "chat_id": TELEGRAM_CHAT_ID, "text": message,
-        "parse_mode": "HTML", "disable_web_page_preview": True,
-    }
-    try:
-        resp = requests.post(url, json=payload, timeout=10)
-        resp.raise_for_status()
-        return True
-    except Exception as e:
-        log.error(f"ส่ง Telegram ล้มเหลว: {e}")
-        return False
-
-
-def fmt_vol(vol: int) -> str:
-    if vol >= 1_000_000_000: return f"{vol/1_000_000_000:.1f}B"
-    if vol >= 1_000_000:     return f"{vol/1_000_000:.1f}M"
-    return f"{vol:,}"
-
-
-def score_bar(score: int) -> str:
-    return f"{'█' * score}{'░' * (10 - score)} {score}/10"
-
-
-def build_message(stock: dict, headlines: list, confidence: float) -> str:
+def build_message(rank: int, stock: dict, headlines: list, confidence: float) -> str:
     s   = stock["score"]
     t   = stock["ticker"]
     bar = score_bar(s)
@@ -421,8 +396,11 @@ def build_message(stock: dict, headlines: list, confidence: float) -> str:
     e50      = stock["entry_ema50"]
     e200     = stock["entry_ema200"]
 
+    # ใช้อีโมจิตามอันดับ
+    rank_emoji = ["🥇", "🥈", "🥉", "🏅", "🏅"][rank - 1] if rank <= 5 else "🎖"
+
     return (
-        f"📈 <b>${t}</b>  {badge} (Long-term)\n"
+        f"{rank_emoji} <b>อันดับที่ {rank}</b> | 📈 <b>${t}</b> {badge}\n"
         f"<code>{bar}</code>\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
         f"💲 <b>ราคาปัจจุบัน</b>  ${stock['price']:,.2f}\n"
@@ -451,7 +429,7 @@ def build_message(stock: dict, headlines: list, confidence: float) -> str:
 # ══════════════════════════════════════════════
 def run_scan():
     log.info("══════════════════════════════════════════")
-    log.info("  S&P 500 LONG-TERM SCANNER เริ่มงาน")
+    log.info("  S&P 500 LONG-TERM SCANNER เริ่มงาน (TOP 5 MODE)")
     log.info(f"  Score>={MIN_SCORE} | ADX>{MIN_ADX} | RSI {RSI_LOW}–{RSI_HIGH}")
     log.info(f"  Vol>{MIN_AVG_VOLUME/1e6:.0f}M | MACD Hist>{MIN_MACD_HIST} | Full EMA Stack")
     log.info("══════════════════════════════════════════")
@@ -497,23 +475,27 @@ def run_scan():
         )
         return
 
+    # ── จัดอันดับและคัด TOP 5 ──
+    # เรียงจาก: คะแนนกราฟ (มากไปน้อย) -> ความมั่นใจข่าว (มากไปน้อย)
+    positive_results.sort(key=lambda x: (x[0]["score"], x[2]), reverse=True)
+    top_5_results = positive_results[:5]
+
     # ── Summary ──
     send_telegram(
         f"🚨 <b>S&P 500 LONG-TERM SCAN</b> 🚨\n"
-        f"พบหุ้นน่าสะสม <b>{len(positive_results)} ตัว</b>\n"
-        f"(จาก {len(candidates)} ตัวผ่านเกณฑ์ / Score>={MIN_SCORE})\n"
-        f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"🏆 ≥9  🥇 ≥8  🥈 ≥7  🥉 ≥6"
+        f"พบหุ้นกราฟสวยและข่าวดีรวม <b>{len(positive_results)} ตัว</b>\n"
+        f"คัดเน้นๆ <b>🔥 TOP 5 🔥</b> ประจำวันนี้\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━"
     )
     time.sleep(2)
 
-    for stock, headlines, confidence in positive_results:
-        ok = send_telegram(build_message(stock, headlines, confidence))
-        log.info(f"ส่ง {stock['ticker']} Score:{stock['score']} → {'✅' if ok else '❌'}")
+    # ส่งข้อความทีละตัว ตามอันดับ
+    for rank, (stock, headlines, confidence) in enumerate(top_5_results, 1):
+        ok = send_telegram(build_message(rank, stock, headlines, confidence))
+        log.info(f"ส่ง อันดับ {rank}: {stock['ticker']} Score:{stock['score']} → {'✅' if ok else '❌'}")
         time.sleep(3)
 
-    log.info(f"  เสร็จสิ้น! ส่งทั้งหมด {len(positive_results)} ตัว")
-
+    log.info(f"  เสร็จสิ้น! ส่ง TOP {len(top_5_results)} จากทั้งหมด {len(positive_results)} ตัว")
 
 # ══════════════════════════════════════════════
 #  Flask Routes
