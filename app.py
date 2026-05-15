@@ -316,7 +316,7 @@ def fetch_and_filter(tickers: list) -> list:
 # ══════════════════════════════════════════════
 #  STEP 3 — ดึงข่าว Yahoo Finance RSS
 # ══════════════════════════════════════════════
-def fetch_news(ticker: str, max_items: int = 5) -> list:
+def fetch_news(ticker: str, max_items: int = 3) -> list:
     url = f"https://feeds.finance.yahoo.com/rss/2.0/headline?s={ticker}&region=US&lang=en-US"
     headlines = []
     try:
