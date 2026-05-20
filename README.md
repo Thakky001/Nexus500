@@ -1,6 +1,6 @@
-# 📖 คู่มือ S&P 500 Long-Term Scanner Bot — ฉบับสมบูรณ์
+# 📖 คู่มือ Russell 1000 Long-Term Scanner Bot — ฉบับสมบูรณ์
 
-> **ระบบสแกนหุ้น S&P 500 อัตโนมัติ** เน้นการลงทุนระยะยาว / DCA สะสมหุ้น  
+> **ระบบสแกนหุ้น Russell 1000 อัตโนมัติ** เน้นการลงทุนระยะยาว / DCA สะสมหุ้น  
 > แจ้งเตือนผ่าน Telegram • บันทึกประวัติลง Google Sheets • Web Dashboard  
 > ใช้งานฟรี 100% บน Render.com + Hugging Face + cron-job.org
 
@@ -9,17 +9,20 @@
 ## ภาพรวมระบบ
 
 ```
-Wikipedia → รายชื่อหุ้น S&P 500 (~503 ตัว)
+Wikipedia → รายชื่อหุ้น Russell 1000 (~1000 ตัว)
     ↓
 yfinance → กราฟย้อนหลัง 1 ปี (ทีละ 50 ตัว)
     ↓
-คัดกรอง 4 ชั้น + Scoring (0–10):
-  ชั้น 1 — Trend    : price > EMA20 > EMA50 > EMA200 + ADX ≥ 20
-  ชั้น 2 — Momentum : RSI 40–70 + MACD Histogram > -0.5
-  ชั้น 3 — Volume   : Avg Volume (20d) ≥ 2M
-  ชั้น 4 — Structure: ห่างจาก 52W High ≤ 20% + Momentum 5 วัน ≥ -5%
+คัดกรอง 5 ชั้น + Scoring (0–10):
+  ชั้น 1 — Trend      : price > EMA20 > EMA50 > EMA200 + ADX ≥ 20
+  ชั้น 2 — Momentum   : RSI 40–70 + MACD Histogram > -0.5
+  ชั้น 3 — Volume     : Avg Volume (20d) ≥ 2M
+  ชั้น 4 — Structure  : ห่างจาก 52W High ≤ 20% + Momentum 5 วัน ≥ -5%
     ↓
 เฉพาะหุ้นที่ Score ≥ 6/10 เท่านั้นผ่าน
+    ↓
+ด่าน Layer 0 — Fundamentals (บังคับ):
+  ROE > 15% + D/E < 1.5x + Net Margin > 10%
     ↓
 Yahoo Finance RSS → ข่าวล่าสุด 3 ข่าว
     ↓
@@ -52,8 +55,8 @@ FinBERT (HuggingFace) → วิเคราะห์ Sentiment
 
 1. เปิด Telegram → ค้นหา **@BotFather** → กดเริ่มสนทนา
 2. พิมพ์ `/newbot` แล้วกด Send
-3. ตั้งชื่อที่แสดง (Display Name) เช่น `SP500 Scanner`
-4. ตั้ง username ต้องลงท้ายด้วย `bot` เช่น `my_sp500_bot`
+3. ตั้งชื่อที่แสดง (Display Name) เช่น `Russell 1000 Scanner`
+4. ตั้ง username ต้องลงท้ายด้วย `bot` เช่น `my_r1000_bot`
 5. BotFather จะส่ง **Bot Token** กลับมา — คัดลอกเก็บไว้
 
 ```
@@ -63,7 +66,7 @@ FinBERT (HuggingFace) → วิเคราะห์ Sentiment
 ### 1.2 สร้าง Channel
 
 1. ใน Telegram กดไอคอนดินสอ (เขียนข้อความใหม่) → **New Channel**
-2. ตั้งชื่อ เช่น `SP500 Daily Scan`
+2. ตั้งชื่อ เช่น `Russell 1000 Daily Scan`
 3. เลือกประเภท **Private** (แนะนำ เพื่อความปลอดภัย)
 4. ข้ามขั้นตอนเพิ่มสมาชิก → กด Done
 
@@ -113,7 +116,7 @@ https://api.telegram.org/bot<TOKEN>/getUpdates
 2. คลิกรูปโปรไฟล์มุมบนขวา → **Settings**
 3. เมนูด้านซ้าย → **Access Tokens**
 4. กด **New token**
-   - Name: ตั้งชื่ออะไรก็ได้ เช่น `sp500-bot`
+   - Name: ตั้งชื่ออะไรก็ได้ เช่น `r1000-bot`
    - Role: เลือก **Read**
 5. กด **Generate a token**
 6. คัดลอก Token ที่ได้เก็บไว้ทันที (จะแสดงแค่ครั้งเดียว)
@@ -131,7 +134,7 @@ https://api.telegram.org/bot<TOKEN>/getUpdates
 ### 3.1 สร้าง Google Sheet
 
 1. ไปที่ [https://sheets.google.com](https://sheets.google.com) → **+ Blank spreadsheet**
-2. ตั้งชื่อ เช่น `SP500 Scanner History`
+2. ตั้งชื่อ เช่น `Russell 1000 Scanner History`
 3. ดู URL ของ Sheet — คัดลอกส่วนที่เป็น **Sheet ID**:
 
 ```
@@ -139,6 +142,8 @@ https://docs.google.com/spreadsheets/d/  [SHEET_ID_อยู่ตรงนี�
 ```
 
 ตัวอย่าง: `1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms`
+
+> ℹ️ ระบบจะสร้าง worksheet ชื่อ **ScanHistory** ขึ้นเองอัตโนมัติในครั้งแรกที่รัน ไม่ต้องสร้างเอง
 
 ### 3.2 สร้าง Service Account
 
@@ -149,7 +154,7 @@ https://docs.google.com/spreadsheets/d/  [SHEET_ID_อยู่ตรงนี�
    - ค้นหา "Google Drive API" → กด **Enable** ด้วย
 4. สร้าง Service Account:
    - ไปที่ **IAM & Admin** → **Service Accounts** → **+ Create Service Account**
-   - ตั้งชื่อ เช่น `sp500-scanner`
+   - ตั้งชื่อ เช่น `r1000-scanner`
    - กด **Create and Continue** → **Done**
 5. ดาวน์โหลด JSON Key:
    - คลิกที่ Service Account ที่เพิ่งสร้าง
@@ -160,7 +165,7 @@ https://docs.google.com/spreadsheets/d/  [SHEET_ID_อยู่ตรงนี�
 
 1. เปิดไฟล์ JSON ที่ดาวน์โหลดมา → หาค่า `client_email` เช่น:
    ```
-   sp500-scanner@your-project.iam.gserviceaccount.com
+   r1000-scanner@your-project.iam.gserviceaccount.com
    ```
 2. กลับไปที่ Google Sheet → กดปุ่ม **Share** มุมบนขวา
 3. ใส่ `client_email` ด้านบน → เลือกสิทธิ์เป็น **Editor** → กด **Send**
@@ -183,7 +188,7 @@ https://docs.google.com/spreadsheets/d/  [SHEET_ID_อยู่ตรงนี�
 
 1. กดปุ่ม **+** มุมบนขวา → **New repository**
 2. ตั้งค่าดังนี้:
-   - Repository name: `sp500-bot`
+   - Repository name: `r1000-bot` (หรือชื่ออื่น)
    - Visibility: **Private** (แนะนำ เพื่อปกป้องโค้ด)
    - ไม่ต้องติ๊กอะไรเพิ่ม
 3. กด **Create repository**
@@ -193,7 +198,7 @@ https://docs.google.com/spreadsheets/d/  [SHEET_ID_อยู่ตรงนี�
 ต้องการ 2 ไฟล์:
 
 ```
-sp500-bot/
+r1000-bot/
 ├── app.py
 └── requirements.txt
 ```
@@ -210,7 +215,7 @@ sp500-bot/
 git init
 git add app.py requirements.txt
 git commit -m "initial commit"
-git remote add origin https://github.com/YOUR_USERNAME/sp500-bot.git
+git remote add origin https://github.com/YOUR_USERNAME/r1000-bot.git
 git push -u origin main
 ```
 
@@ -228,7 +233,7 @@ git push -u origin main
 
 1. หลัง Login → กด **New +** → **Web Service**
 2. เลือก **Build and deploy from a Git repository**
-3. กด **Connect** ที่ Repository `sp500-bot`
+3. กด **Connect** ที่ Repository `r1000-bot`
 
 ### 5.3 ตั้งค่า Build
 
@@ -236,7 +241,7 @@ git push -u origin main
 
 | ฟิลด์             | ค่าที่ต้องใส่                     |
 | ----------------- | --------------------------------- |
-| **Name**          | `sp500-bot` (หรือชื่ออื่น)        |
+| **Name**          | `r1000-bot` (หรือชื่ออื่น)        |
 | **Region**        | Singapore (ใกล้ไทยที่สุด)         |
 | **Runtime**       | Python 3                          |
 | **Build Command** | `pip install -r requirements.txt` |
@@ -264,7 +269,7 @@ git push -u origin main
 3. เมื่อสถานะเป็น **Live 🟢** จะได้ URL มา เช่น:
 
 ```
-https://sp500-bot.onrender.com
+https://r1000-bot.onrender.com
 ```
 
 ### 5.6 ทดสอบระบบ
@@ -274,7 +279,7 @@ https://sp500-bot.onrender.com
 เปิดเบราว์เซอร์ → ไปที่:
 
 ```
-https://sp500-bot.onrender.com/health
+https://r1000-bot.onrender.com/health
 ```
 
 ควรได้:
@@ -291,7 +296,7 @@ https://sp500-bot.onrender.com/health
 ไปที่:
 
 ```
-https://sp500-bot.onrender.com/trigger
+https://r1000-bot.onrender.com/trigger
 ```
 
 ควรได้:
@@ -299,19 +304,19 @@ https://sp500-bot.onrender.com/trigger
 ```json
 {
   "status": "accepted",
-  "message": "LONG-TERM SCANNER เริ่มสแกนแล้ว 🔍",
-  "filters": "Score>=6 | ADX>20 | RSI 40–70"
+  "message": "LONG-TERM SCANNER (1000 Stocks) เริ่มสแกนแล้ว 🔍",
+  "filters": "Score>=6 | Fund+Trend+RSI"
 }
 ```
 
-จากนั้นรอประมาณ **20–40 นาที** แล้วตรวจดูใน Telegram Channel
+จากนั้นรอประมาณ **30–60 นาที** (เนื่องจากสแกน 1000 ตัว + ตรวจงบการเงินรายตัว) แล้วตรวจดูใน Telegram Channel
 
 **ดู Web Dashboard:**
 
 ไปที่:
 
 ```
-https://sp500-bot.onrender.com/
+https://r1000-bot.onrender.com/
 ```
 
 จะเห็น Dashboard แสดงประวัติการสแกนทั้งหมดจาก Google Sheets
@@ -330,8 +335,8 @@ https://sp500-bot.onrender.com/
 
 | ฟิลด์        | ค่าที่ต้องใส่                            |
 | ------------ | ---------------------------------------- |
-| **Title**    | `SP500 Bot Daily Trigger`                |
-| **URL**      | `https://sp500-bot.onrender.com/trigger` |
+| **Title**    | `Russell 1000 Bot Daily Trigger`         |
+| **URL**      | `https://r1000-bot.onrender.com/trigger` |
 | **Schedule** | Custom (ดูด้านล่าง)                      |
 
 ### 6.3 ตั้ง Schedule แบบ Custom
@@ -370,20 +375,30 @@ https://sp500-bot.onrender.com/
 
 ---
 
-## ระบบ Scoring (0–10 คะแนน)
+## ระบบ Scoring และเกณฑ์คัดกรอง
 
-| เงื่อนไข                                     | คะแนน       | หมายเหตุ                              |
-| -------------------------------------------- | ----------- | ------------------------------------- |
-| ผ่าน Trend (EMA Stack + EMA50 Slope)         | +2          | **บังคับ** ถ้าไม่ผ่านจะถูกตัดออกทันที |
-| ADX ≥ 20                                     | รวมใน Trend | **บังคับ**                            |
-| ADX ≥ 30 (เทรนด์แข็ง)                        | +1 Bonus    |                                       |
-| ผ่าน Momentum (RSI + MACD)                   | +2          | **บังคับ**                            |
-| RSI อยู่ในโซน 40–55 (โซนเก็บของ)             | +1 Bonus    |                                       |
-| ผ่าน Volume (Avg Vol ≥ 2M)                   | +2          | **บังคับ**                            |
-| Vol วันนี้ ≥ 1.5x ค่าเฉลี่ย (แรงซื้อผิดปกติ) | +1 Bonus    |                                       |
-| ราคาห่างจาก 52W High ≤ 20%                   | +1          |                                       |
-| Momentum 5 วัน ≥ -5%                         | +1          |                                       |
-| **คะแนนรวมสูงสุด**                           | **10**      | ต้องได้ ≥ 6 จึงผ่าน                   |
+### Layer 0 — Fundamentals (บังคับ ตรวจหลัง Technical Score)
+
+| เงื่อนไข                      | เกณฑ์      | หมายเหตุ                                                                |
+| ----------------------------- | ---------- | ----------------------------------------------------------------------- |
+| ROE (Return on Equity)        | > 15%      | ถ้าไม่ผ่านจะถูกตัดออกทันที                                              |
+| D/E Ratio (หนี้ต่อทุน)        | < 1.5 เท่า | ข้ามเกณฑ์นี้สำหรับหุ้นกลุ่ม Financial Services (ค่า D/E มักสูงเป็นปกติ) |
+| Net Profit Margin (กำไรสุทธิ) | > 10%      | ถ้าไม่ผ่านจะถูกตัดออกทันที                                              |
+
+### Layer 1–4 — Technical Scoring (0–10 คะแนน)
+
+| เงื่อนไข                                     | คะแนน       | หมายเหตุ                               |
+| -------------------------------------------- | ----------- | -------------------------------------- |
+| ผ่าน Trend (EMA Stack + EMA50 Slope)         | +2          | **บังคับ** ถ้าไม่ผ่านจะถูกตัดออกทันที  |
+| ADX ≥ 20                                     | รวมใน Trend | **บังคับ**                             |
+| ADX ≥ 30 (เทรนด์แข็ง)                        | +1 Bonus    |                                        |
+| ผ่าน Momentum (RSI + MACD)                   | +2          | **บังคับ**                             |
+| RSI อยู่ในโซน 40–55 (โซนเก็บของ)             | +1 Bonus    |                                        |
+| ผ่าน Volume (Avg Vol ≥ 2M)                   | +2          | **บังคับ**                             |
+| Vol วันนี้ ≥ 1.5x ค่าเฉลี่ย (แรงซื้อผิดปกติ) | +1 Bonus    |                                        |
+| ราคาห่างจาก 52W High ≤ 20%                   | +1          |                                        |
+| Momentum 5 วัน ≥ -5%                         | +1          |                                        |
+| **คะแนนรวมสูงสุด**                           | **10**      | ต้องได้ ≥ 6 จึงผ่านไปตรวจ Fundamentals |
 
 **เกณฑ์ Badge:**
 
@@ -401,8 +416,8 @@ https://sp500-bot.onrender.com/
 **ข้อความสรุป (ส่งก่อน):**
 
 ```
-🚨 S&P 500 LONG-TERM SCAN — TOP 5 🚨
-จากหุ้น Positive ทั้งหมด 12 ตัว (ผ่านเกณฑ์กราฟ 47 ตัว)
+🚨 LONG-TERM SCAN — TOP 5 🚨
+จากหุ้น Positive ทั้งหมด 12 ตัว (ผ่านทั้งกราฟ + งบการเงิน 47 ตัว)
 จัดอันดับจาก Technical Score + Sentiment Confidence
 ━━━━━━━━━━━━━━━━━━━━━━━━
 🥇 $AAPL  Tech:9/10  Sentiment:94%
@@ -423,9 +438,15 @@ https://sp500-bot.onrender.com/
 💲 ราคาปัจจุบัน  $189.50
 📊 EMA 20/50/200  $184.20 / $178.30 / $162.40
 ━━━━━━━━━━━━━━━━━━━━━━━━
-🔢 RSI (14)     52.3
-📉 MACD Hist   +0.1234
-🏔 ห่าง 52W High -8.2%
+🏢 Fundamentals (ความแข็งแกร่ง)
+  • ROE: 28.5%
+  • Net Margin: 24.3%
+  • D/E Ratio: 0.87x
+  • Div Yield: 0.55%
+━━━━━━━━━━━━━━━━━━━━━━━━
+🔢 Technical Stats
+  • RSI(14): 52.3 | MACD Hist: +0.1234
+  • ห่าง 52W High: -8.2%
 ━━━━━━━━━━━━━━━━━━━━━━━━
 🎯 แผนการสะสม (Accumulation Zones)
 
@@ -450,6 +471,11 @@ https://sp500-bot.onrender.com/
 แก้ค่าในส่วน Config ของ `app.py`:
 
 ```python
+# ── Layer 0: Fundamentals ──────────────────────
+MIN_ROE           = 0.15    # ROE > 15% (เพิ่มเป็น 0.20 ถ้าต้องการเข้มขึ้น)
+MAX_DEBT_EQUITY   = 150.0   # D/E < 1.5 เท่า (ค่าในโค้ดเก็บเป็น % จาก yfinance)
+MIN_PROFIT_MARGIN = 0.10    # Net Margin > 10% (เพิ่มเป็น 0.15 ถ้าต้องการกำไรสูง)
+
 # ── ชั้น 1: Trend ──────────────────────────────
 MIN_ADX         = 20    # เพิ่มเป็น 25 ถ้าต้องการเทรนด์แข็งขึ้น
 EMA_SLOPE_DAYS  = 20    # จำนวนวันที่ใช้คำนวณ Slope ของ EMA50
@@ -513,7 +539,11 @@ cron-job.org จะ "ปลุก" ทุกวัน ซึ่งใช้เ�
 ### ❓ ไม่มีหุ้นผ่านเกณฑ์เลย หรือน้อยมาก
 
 เป็นเรื่องปกติในตลาด Downtrend หรือช่วงที่ Sentiment ไม่ดี  
-Bot จะส่งข้อความแจ้งว่า "ไม่มีหุ้นผ่านเกณฑ์" เข้า Telegram แทน
+Bot จะส่งข้อความแจ้งว่า "ไม่มีหุ้นผ่านเกณฑ์" เข้า Telegram แทน มี 3 กรณี:
+
+- ไม่ผ่านเกณฑ์ Technical เลย
+- ผ่าน Technical แต่ไม่มีตัวไหนผ่านเกณฑ์งบการเงิน
+- ผ่านทั้งคู่แต่ไม่มีข่าว Positive
 
 ### ❓ Google Sheets ไม่บันทึกข้อมูล
 
@@ -521,21 +551,31 @@ Bot จะส่งข้อความแจ้งว่า "ไม่มี�
 2. ตรวจสอบว่า Service Account Email ได้รับสิทธิ์ **Editor** ใน Sheet แล้ว
 3. ดู Log บน Render ในส่วน "บันทึก Google Sheets" เพื่อดู Error message
 
+### ❓ สแกนใช้เวลานานมาก
+
+Russell 1000 มีหุ้น ~1000 ตัว โดยปกติระบบจะใช้เวลา 30–60 นาที เนื่องจาก:
+
+- ดาวน์โหลดข้อมูลกราฟทีละ 50 ตัว + พัก 10 วินาทีระหว่าง chunk
+- ตรวจงบการเงินทีละหุ้ย (พัก 0.5 วินาที/ตัว) เฉพาะตัวที่ผ่าน Technical
+- ดึงข่าว + เรียก FinBERT API
+
 ---
 
 ## โครงสร้างโค้ด `app.py`
 
 ```
 app.py
-├── Config          — ค่า Environment Variables + เกณฑ์คัดกรอง
-├── Google Sheets   — get_gsheet(), save_to_sheet(), read_sheet_data()
-├── Step 1          — get_sp500_tickers() → โหลดรายชื่อจาก Wikipedia
-├── Step 2          — score_stock() + fetch_and_filter() → คัดกรอง 4 ชั้น
-├── Step 3          — fetch_news() → Yahoo Finance RSS
-├── Step 4          — analyze_sentiment() → FinBERT API
-├── Step 5          — send_telegram() + build_message() → ส่งแจ้งเตือน
-├── run_scan()      — งานหลักที่รันใน Background Thread
-├── DASHBOARD_HTML  — HTML Web Dashboard (inline template)
+├── Config            — ค่า Environment Variables + เกณฑ์คัดกรองทุก Layer
+├── Google Sheets     — get_gsheet(), save_to_sheet(), read_sheet_data()
+├── Step 1            — get_1000_tickers() → โหลดรายชื่อ Russell 1000 จาก Wikipedia
+│                       get_sp500_tickers() → Fallback กรณีโหลด Russell 1000 ไม่สำเร็จ
+├── Step 2            — score_stock() + fetch_and_filter() → คัดกรอง 4 ชั้น Technical
+├── Step 2.5          — check_fundamentals() → ตรวจ ROE / D/E / Net Margin
+├── Step 3            — fetch_news() → Yahoo Finance RSS
+├── Step 4            — analyze_sentiment() → FinBERT API
+├── Step 5            — send_telegram() + build_message() → ส่งแจ้งเตือน
+├── run_scan()        — งานหลักที่รันใน Background Thread
+├── DASHBOARD_HTML    — HTML Web Dashboard (inline template)
 └── Flask Routes
     ├── GET /          → Web Dashboard
     ├── GET /trigger   → เริ่มสแกน
@@ -560,5 +600,5 @@ app.py
 
 ---
 
-> ⚠️ **Disclaimer:** ข้อมูลที่ระบบสร้างขึ้นเป็นเพื่อการศึกษาและทดลองเท่านั้น  
+> ⚠️ **Disclaimer:** ข้อมูลที่ระบบสร้างขึ้นเพื่อการศึกษาและทดลองเท่านั้น  
 > ไม่ใช่คำแนะนำการลงทุน การลงทุนมีความเสี่ยง ผู้ลงทุนควรศึกษาข้อมูลเพิ่มเติมก่อนตัดสินใจเสมอ

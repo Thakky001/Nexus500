@@ -106,12 +106,12 @@ SHEET_HEADERS = [
     "rsi", "adx", "macd_hist",
     "pct_from_52w", "momentum_5d",
     "avg_vol", "vol_surge",
-    "roe", "debt_equity", "profit_margin", "div_yield",
     "score", "sentiment", "confidence",
     "composite",
     "entry_current", "entry_ema50", "entry_ema200",
     "headlines",
     "current_price", "change_pct",
+    "roe", "debt_equity", "profit_margin", "div_yield", # <-- ย้าย 4 ตัวนี้มาไว้ท้ายสุดให้ตรงกับ Sheet เดิม
 ]
 
 def get_gsheet():
@@ -181,10 +181,6 @@ def save_to_sheet(results: list, scan_date: str):
             stock.get("momentum_5d", ""),
             stock.get("avg_vol", ""),
             stock.get("vol_surge", ""),
-            stock.get("roe", ""),            
-            stock.get("debt_equity", ""),    
-            stock.get("profit_margin", ""),  
-            stock.get("div_yield", ""),      
             stock.get("score", ""),
             "positive",
             round(confidence, 4),
@@ -197,6 +193,10 @@ def save_to_sheet(results: list, scan_date: str):
             '=IFERROR(GOOGLEFINANCE(INDIRECT("B"&ROW()),"price"),"")',
             # change_pct: % เปลี่ยนแปลงจากราคาตอนสแกน (column D = price, W = current_price)
             '=IFERROR((INDIRECT("W"&ROW())-INDIRECT("D"&ROW()))/INDIRECT("D"&ROW())*100,"")',
+            stock.get("roe", ""),            # <-- ย้ายมาต่อท้ายสุด
+            stock.get("debt_equity", ""),    # <-- ย้ายมาต่อท้ายสุด
+            stock.get("profit_margin", ""),  # <-- ย้ายมาต่อท้ายสุด
+            stock.get("div_yield", ""),      # <-- ย้ายมาต่อท้ายสุด
         ])
 
     try:
@@ -1143,7 +1143,7 @@ function renderTable(data) {
     const macdClass = r.macd_hist >= 0 ? 'macd-pos' : 'macd-neg';
     const macdSign  = r.macd_hist >= 0 ? '+' : '';
 
-    const headlines = (r.headlines || '').split(' | ');
+    const headlines = String(r.headlines || '').split(' | ');
     const newsPreview = headlines[0] || '—';
     const newsFull = headlines.map((h,i) => `${i+1}. ${h}`).join('<br>');
 
@@ -1174,7 +1174,7 @@ function renderTable(data) {
         </div>
       </td>
       <td><span class="conf-badge">🟢 ${confPct}%</span></td>
-      <td style="font-family:var(--font-mono);font-weight:700;color:var(--gold)">${parseFloat(r.composite||0).toFixed(2)}</td>
+      <td style="font-family:var(--font-mono);font-weight:700;color:var(--gold)">${(parseFloat(r.composite) || 0).toFixed(2)}</td>
       <td style="font-family:var(--font-mono);color:var(--subtext)">$${parseFloat(r.price||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
       <td style="font-family:var(--font-mono)">${curPriceStr}</td>
       <td>${changePctStr}</td>
