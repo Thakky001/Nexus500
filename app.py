@@ -1,11 +1,11 @@
 """
 ╔══════════════════════════════════════════════════════════╗
-║   S&P 500 Stock Scanner Bot  •  app.py  [LONG-TERM]      ║
+║  Russell 1000 Stock Scanner Bot • app.py [LONG-TERM]     ║
 ║  Flask + yfinance + pandas-ta + FinBERT + Telegram       ║
 ║  + Google Sheets History + Web Dashboard                 ║
 ╠══════════════════════════════════════════════════════════╣
-║  ระบบคัดกรอง 4 ชั้น สำหรับการลงทุนระยะยาว / DCA สะสมหุ้น      ║
-║  เน้นหุ้นพื้นฐานดีที่ยืนบนแนวโน้มขาขึ้น และรอรับเมื่อราคาย่อตัว      ║
+║  ระบบคัดกรอง 5 ชั้น สำหรับการลงทุนระยะยาว / DCA สะสมหุ้น      ║
+║  (เพิ่มด่าน Layer 0 เช็คงบการเงิน และขยายฐานเป็น 1000 ตัว)     ║
 ╚══════════════════════════════════════════════════════════╝
 
 Environment Variables บน Render:
@@ -59,6 +59,11 @@ HF_MODEL_URL = "https://router.huggingface.co/hf-inference/models/ProsusAI/finbe
 #  ⚙️  เกณฑ์คัดกรอง (ปรับสำหรับลงทุนระยะยาว)
 # ══════════════════════════════════════════════
 
+# ── ชั้น 0: Fundamentals (งบการเงิน - บังคับ) ──
+MIN_ROE           = 0.15    # ROE > 15% (ประสิทธิภาพการทำกำไรจากเงินทุน)
+MAX_DEBT_EQUITY   = 150.0   # D/E < 1.5 เท่า (หนี้ไม่ควรเกิน 1.5 เท่าของทุน)
+MIN_PROFIT_MARGIN = 0.10    # Net Margin > 10% (อัตรากำไรสุทธิ)
+
 # ── ชั้น 1: Trend Alignment (บังคับ) ──
 MIN_ADX           = 20
 EMA_SLOPE_DAYS    = 20
@@ -101,6 +106,7 @@ SHEET_HEADERS = [
     "rsi", "adx", "macd_hist",
     "pct_from_52w", "momentum_5d",
     "avg_vol", "vol_surge",
+    "roe", "debt_equity", "profit_margin", "div_yield",
     "score", "sentiment", "confidence",
     "composite",
     "entry_current", "entry_ema50", "entry_ema200",
@@ -175,6 +181,10 @@ def save_to_sheet(results: list, scan_date: str):
             stock.get("momentum_5d", ""),
             stock.get("avg_vol", ""),
             stock.get("vol_surge", ""),
+            stock.get("roe", ""),            
+            stock.get("debt_equity", ""),    
+            stock.get("profit_margin", ""),  
+            stock.get("div_yield", ""),      
             stock.get("score", ""),
             "positive",
             round(confidence, 4),
@@ -224,10 +234,26 @@ def read_sheet_data(limit: int = 200) -> list:
 
 
 # ══════════════════════════════════════════════
-#  STEP 1 — โหลดรายชื่อ S&P 500
+#  STEP 1 — โหลดรายชื่อ Russell 1000 (ประมาณ 1000 ตัว)
 # ══════════════════════════════════════════════
 def get_sp500_tickers() -> list:
+    """ฟังก์ชันสำรอง กรณีโหลด 1000 ตัวล้มเหลว"""
     url = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
+    headers = {"User-Agent": "Mozilla/5.0"}
+    try:
+        resp = requests.get(url, headers=headers, timeout=15)
+        resp.raise_for_status()
+        tables  = pd.read_html(io.StringIO(resp.text), attrs={"id": "constituents"})
+        tickers = tables[0]["Symbol"].str.replace(".", "-", regex=False).tolist()
+        log.info(f"[Fallback] โหลด S&P 500 สำเร็จ: {len(tickers)} ตัว")
+        return tickers
+    except Exception as e:
+        log.error(f"โหลด S&P 500 ล้มเหลว: {e}")
+        return []
+
+def get_1000_tickers() -> list:
+    """โหลดรายชื่อจาก Russell 1000 Index"""
+    url = "https://en.wikipedia.org/wiki/Russell_1000_Index"
     headers = {"User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
@@ -235,17 +261,26 @@ def get_sp500_tickers() -> list:
     try:
         resp = requests.get(url, headers=headers, timeout=15)
         resp.raise_for_status()
-        tables  = pd.read_html(io.StringIO(resp.text), attrs={"id": "constituents"})
-        tickers = tables[0]["Symbol"].str.replace(".", "-", regex=False).tolist()
-        log.info(f"โหลดรายชื่อหุ้นสำเร็จ: {len(tickers)} ตัว")
-        return tickers
+        tables = pd.read_html(io.StringIO(resp.text))
+        for table in tables:
+            if "Symbol" in table.columns:
+                tickers = table["Symbol"].str.replace(".", "-", regex=False).tolist()
+                log.info(f"โหลดรายชื่อ Russell 1000 สำเร็จ: {len(tickers)} ตัว")
+                return tickers
+            elif "Ticker" in table.columns:
+                tickers = table["Ticker"].str.replace(".", "-", regex=False).tolist()
+                log.info(f"โหลดรายชื่อ Russell 1000 สำเร็จ: {len(tickers)} ตัว")
+                return tickers
+        
+        log.warning("ไม่พบคอลัมน์ Symbol ในตาราง Wikipedia — สลับไปใช้ S&P 500")
+        return get_sp500_tickers()
     except Exception as e:
-        log.error(f"โหลดรายชื่อหุ้นล้มเหลว: {e}")
-        return []
+        log.error(f"โหลดรายชื่อ Russell 1000 ล้มเหลว: {e}")
+        return get_sp500_tickers()
 
 
 # ══════════════════════════════════════════════
-#  STEP 2 — คัดกรอง 4 ชั้น + Scoring
+#  STEP 2 — คัดกรอง 4 ชั้น + Scoring (Technical)
 # ══════════════════════════════════════════════
 def score_stock(df: pd.DataFrame) -> tuple:
     score   = 0
@@ -413,6 +448,39 @@ def fetch_and_filter(tickers: list) -> list:
 
 
 # ══════════════════════════════════════════════
+#  STEP 2.5 — ตรวจสอบงบการเงิน (Fundamentals)
+# ══════════════════════════════════════════════
+def check_fundamentals(ticker: str) -> tuple:
+    """ดึงข้อมูลงบการเงินและคัดกรองความแข็งแกร่ง"""
+    try:
+        info = yf.Ticker(ticker).info
+        
+        roe = info.get('returnOnEquity', 0) or 0
+        de = info.get('debtToEquity', 999) or 999
+        margin = info.get('profitMargins', 0) or 0
+        div = info.get('dividendYield', 0) or 0
+
+        passed = True
+        # บางบริษัทที่เป็นการเงิน (Financials) ค่า D/E อาจจะเพี้ยนหรือไม่มี จะอนุโลมให้ผ่าน
+        if info.get('sector') != 'Financial Services':
+            if de > MAX_DEBT_EQUITY: passed = False
+            
+        if roe < MIN_ROE: passed = False
+        if margin < MIN_PROFIT_MARGIN: passed = False
+
+        details = {
+            "roe": round(roe * 100, 2),
+            "debt_equity": round(de / 100, 2), # แปลง % เป็นเท่า
+            "profit_margin": round(margin * 100, 2),
+            "div_yield": round(div * 100, 2)
+        }
+        return passed, details
+    except Exception as e:
+        log.debug(f"ดึงข้อมูลงบ {ticker} ล้มเหลว: {e}")
+        return False, {"roe": 0, "debt_equity": 0, "profit_margin": 0, "div_yield": 0}
+
+
+# ══════════════════════════════════════════════
 #  STEP 3 — ดึงข่าว Yahoo Finance RSS
 # ══════════════════════════════════════════════
 def fetch_news(ticker: str, max_items: int = 3) -> list:
@@ -529,9 +597,15 @@ def build_message(stock: dict, headlines: list, confidence: float, rank: int = 0
         f"📊 <b>EMA 20/50/200</b>  "
         f"${stock['ema20']:,.2f} / ${stock['ema50']:,.2f} / ${stock['ema200']:,.2f}\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"🔢 <b>RSI (14)</b>     {stock['rsi']}\n"
-        f"📉 <b>MACD Hist</b>   {stock['macd_hist']:+.4f}\n"
-        f"🏔 <b>ห่าง 52W High</b> -{stock['pct_from_52w']:.1f}%\n"
+        f"🏢 <b>Fundamentals (ความแข็งแกร่ง)</b>\n"
+        f"  • ROE: {stock.get('roe', 0):.1f}%\n"
+        f"  • Net Margin: {stock.get('profit_margin', 0):.1f}%\n"
+        f"  • D/E Ratio: {stock.get('debt_equity', 0):.2f}x\n"
+        f"  • Div Yield: {stock.get('div_yield', 0):.2f}%\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"🔢 <b>Technical Stats</b>\n"
+        f"  • RSI(14): {stock['rsi']} | MACD Hist: {stock['macd_hist']:+.4f}\n"
+        f"  • ห่าง 52W High: -{stock['pct_from_52w']:.1f}%\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
         f"🎯 <b>แผนการสะสม (Accumulation Zones)</b>\n\n"
         f"  ▶️ <b>ไม้แรก (ราคาปัจจุบัน)</b> : <code>${ecurrent:,.2f}</code>\n"
@@ -553,28 +627,43 @@ def build_message(stock: dict, headlines: list, confidence: float, rank: int = 0
 # ══════════════════════════════════════════════
 def run_scan():
     log.info("══════════════════════════════════════════")
-    log.info("  S&P 500 LONG-TERM SCANNER เริ่มงาน")
+    log.info("  1000 STOCK LONG-TERM SCANNER เริ่มงาน")
     log.info(f"  Score>={MIN_SCORE} | ADX>{MIN_ADX} | RSI {RSI_LOW}–{RSI_HIGH}")
     log.info(f"  Vol>{MIN_AVG_VOLUME/1e6:.0f}M | MACD Hist>{MIN_MACD_HIST} | Full EMA Stack")
     log.info("══════════════════════════════════════════")
 
     scan_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
-    tickers = get_sp500_tickers()
+    tickers = get_1000_tickers()
     if not tickers:
         return
 
     candidates = fetch_and_filter(tickers)
     if not candidates:
         send_telegram(
-            f"🔍 <b>S&P 500 Long-Term Scanner</b>\n\n"
-            f"ไม่มีหุ้นผ่านเกณฑ์ 4 ชั้นวันนี้ 📭\n"
+            f"🔍 <b>Long-Term Scanner</b>\n\n"
+            f"ไม่มีหุ้นผ่านเกณฑ์กราฟวันนี้ 📭\n"
             f"<i>(เกณฑ์: Score >= {MIN_SCORE}/10)</i>"
         )
         return
 
-    positive_results = []
+    # ── ด่านงบการเงิน ───────────────────────────────────────────────────
+    fund_passed = []
     for stock in candidates:
+        ticker = stock["ticker"]
+        log.info(f"ตรวจงบการเงิน {ticker}...")
+        passed, fund_details = check_fundamentals(ticker)
+        if passed:
+            stock.update(fund_details)
+            fund_passed.append(stock)
+        time.sleep(0.5)  # ป้องกันโดนแบน API
+
+    if not fund_passed:
+        send_telegram("ผ่านกราฟแต่ไม่มีหุ้นตัวไหนผ่านเกณฑ์งบการเงินวันนี้ 📭")
+        return
+
+    positive_results = []
+    for stock in fund_passed:
         ticker = stock["ticker"]
         log.info(f"ดึงข่าว {ticker} (Score:{stock['score']})...")
         time.sleep(NEWS_PAUSE)
@@ -596,8 +685,8 @@ def run_scan():
 
     if not positive_results:
         send_telegram(
-            f"🔍 <b>S&P 500 Long-Term Scanner</b>\n\n"
-            f"ผ่านเกณฑ์กราฟ {len(candidates)} ตัว\n"
+            f"🔍 <b>Long-Term Scanner</b>\n\n"
+            f"ผ่านเกณฑ์กราฟ + งบการเงิน {len(fund_passed)} ตัว\n"
             f"แต่ไม่มีข่าว Positive วันนี้ 📭"
         )
         return
@@ -623,9 +712,9 @@ def run_scan():
         )
 
     send_telegram(
-        f"🚨 <b>S&P 500 LONG-TERM SCAN — TOP {TOP_N}</b> 🚨\n"
+        f"🚨 <b>LONG-TERM SCAN — TOP {TOP_N}</b> 🚨\n"
         f"จากหุ้น Positive ทั้งหมด {total_passed} ตัว "
-        f"(ผ่านเกณฑ์กราฟ {len(candidates)} ตัว)\n"
+        f"(ผ่านทั้งกราฟ + งบการเงิน {len(fund_passed)} ตัว)\n"
         f"<i>จัดอันดับจาก Technical Score + Sentiment Confidence</i>\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
         f"{summary_rows}"
@@ -654,7 +743,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>S&P 500 Scanner — History</title>
+<title>Russell 1000 Scanner — History</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Noto+Sans+Thai:wght@300;400;600&display=swap" rel="stylesheet">
 <style>
@@ -902,11 +991,10 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
 <div class="wrapper">
 
-  <!-- Header -->
   <header>
     <div class="logo-block">
-      <div class="logo-title">◈ S&P 500 SCANNER</div>
-      <div class="logo-sub">Long-Term • 4-Layer Filter • History Dashboard</div>
+      <div class="logo-title">◈ RUSSELL 1000 SCANNER</div>
+      <div class="logo-sub">Long-Term • Fund & Tech Filter • History Dashboard</div>
     </div>
     <div class="header-meta">
       <div class="stat-pill">
@@ -924,10 +1012,8 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     </div>
   </header>
 
-  <!-- Filter config display -->
   <div class="config-grid" id="config-grid"></div>
 
-  <!-- Filter bar -->
   <div class="filter-bar">
     <label>🔍</label>
     <input type="text" id="search" placeholder="ค้นหา Ticker…">
@@ -947,7 +1033,6 @@ DASHBOARD_HTML = """<!DOCTYPE html>
     </select>
   </div>
 
-  <!-- Table -->
   <div class="table-wrap">
     <table id="main-table">
       <thead>
@@ -977,7 +1062,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 
   <footer>
     <p>⚠️ ข้อมูลนี้เพื่อการศึกษาเท่านั้น ไม่ใช่คำแนะนำการลงทุน</p>
-    <p>S&P 500 Scanner Bot — Render + Hugging Face + Google Sheets</p>
+    <p>Russell 1000 Scanner Bot — Render + Hugging Face + Google Sheets</p>
   </footer>
 </div>
 
@@ -988,13 +1073,14 @@ const RAW    = {{ rows | tojson }};
 // ── Config display ───────────────────────────
 const configGrid = document.getElementById('config-grid');
 const cfgItems = [
-  ['Trend',   CONFIG.layer1_trend],
-  ['EMA Slope', CONFIG.layer1_slope],
-  ['ADX',     CONFIG.layer1_adx],
-  ['RSI',     CONFIG.layer2_rsi],
-  ['MACD',    CONFIG.layer2_macd],
-  ['Volume',  CONFIG.layer3_volume],
-  ['Min Score', CONFIG.min_score],
+  ['Fundamentals', CONFIG.layer0_fund],
+  ['Trend',        CONFIG.layer1_trend],
+  ['EMA Slope',    CONFIG.layer1_slope],
+  ['ADX',          CONFIG.layer1_adx],
+  ['RSI',          CONFIG.layer2_rsi],
+  ['MACD',         CONFIG.layer2_macd],
+  ['Volume',       CONFIG.layer3_volume],
+  ['Min Score',    CONFIG.min_score],
 ];
 cfgItems.forEach(([k,v]) => {
   configGrid.innerHTML += `
@@ -1157,6 +1243,7 @@ def index():
     """
     rows   = read_sheet_data(limit=300)
     config = {
+        "layer0_fund":   f"ROE>{MIN_ROE*100}%, D/E<{MAX_DEBT_EQUITY}%, Margin>{MIN_PROFIT_MARGIN*100}%",
         "layer1_trend":  "price > EMA20 > EMA50 > EMA200",
         "layer1_slope":  f"EMA50 slope >= {MIN_EMA50_SLOPE}%",
         "layer1_adx":    f">= {MIN_ADX}",
@@ -1188,8 +1275,8 @@ def trigger():
     threading.Thread(target=run_scan, daemon=True).start()
     return jsonify({
         "status":  "accepted",
-        "message": "LONG-TERM SCANNER เริ่มสแกนแล้ว 🔍",
-        "filters": f"Score>={MIN_SCORE} | ADX>{MIN_ADX} | RSI {RSI_LOW}–{RSI_HIGH}",
+        "message": "LONG-TERM SCANNER (1000 Stocks) เริ่มสแกนแล้ว 🔍",
+        "filters": f"Score>={MIN_SCORE} | Fund+Trend+RSI",
     })
 
 
