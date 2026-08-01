@@ -1,0 +1,500 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Russell 1000 Scanner — History</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Noto+Sans+Thai:wght@300;400;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:        #0a0e17;
+    --surface:   #111827;
+    --border:    #1e2d40;
+    --accent:    #00d4ff;
+    --green:     #00e676;
+    --gold:      #ffd700;
+    --red:       #ff5252;
+    --muted:     #4a5568;
+    --text:      #e2e8f0;
+    --subtext:   #8899aa;
+    --font-mono: 'Space Mono', monospace;
+    --font-th:   'Noto Sans Thai', sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-th);
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* Grid background */
+  body::before {
+    content: '';
+    position: fixed; inset: 0; z-index: 0;
+    background-image:
+      linear-gradient(rgba(0,212,255,0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0,212,255,0.03) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none;
+  }
+
+  .wrapper { position: relative; z-index: 1; max-width: 1400px; margin: 0 auto; padding: 32px 24px; }
+
+  /* ── Header ── */
+  header {
+    display: flex; align-items: flex-end; justify-content: space-between;
+    margin-bottom: 40px; flex-wrap: wrap; gap: 16px;
+  }
+  .logo-block { display: flex; flex-direction: column; gap: 4px; }
+  .logo-title {
+    font-family: var(--font-mono); font-size: 1.5rem; font-weight: 700;
+    color: var(--accent); letter-spacing: 0.05em;
+    text-shadow: 0 0 24px rgba(0,212,255,0.4);
+  }
+  .logo-sub { font-size: 0.78rem; color: var(--subtext); font-family: var(--font-mono); }
+
+  .header-meta {
+    display: flex; gap: 20px; align-items: center; flex-wrap: wrap;
+  }
+  .stat-pill {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 6px; padding: 8px 16px;
+    display: flex; flex-direction: column; align-items: center; gap: 2px;
+  }
+  .stat-pill .num { font-family: var(--font-mono); font-size: 1.2rem; color: var(--accent); font-weight: 700; }
+  .stat-pill .lbl { font-size: 0.68rem; color: var(--subtext); text-transform: uppercase; letter-spacing: 0.08em; }
+
+  /* ── Filter bar ── */
+  .filter-bar {
+    display: flex; gap: 12px; margin-bottom: 24px; flex-wrap: wrap; align-items: center;
+  }
+  .filter-bar label { font-size: 0.78rem; color: var(--subtext); }
+  .filter-bar input, .filter-bar select {
+    background: var(--surface); border: 1px solid var(--border);
+    color: var(--text); border-radius: 6px; padding: 7px 12px;
+    font-family: var(--font-mono); font-size: 0.8rem; outline: none;
+    transition: border-color 0.2s;
+  }
+  .filter-bar input:focus, .filter-bar select:focus { border-color: var(--accent); }
+  .filter-bar input { width: 160px; }
+
+  /* ── Table ── */
+  .table-wrap {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 12px; overflow: hidden;
+  }
+  table { width: 100%; border-collapse: collapse; }
+  thead th {
+    background: #0d1520; padding: 12px 14px;
+    font-family: var(--font-mono); font-size: 0.68rem;
+    color: var(--subtext); text-transform: uppercase;
+    letter-spacing: 0.1em; text-align: left;
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap; cursor: pointer; user-select: none;
+  }
+  thead th:hover { color: var(--accent); }
+  thead th.sorted { color: var(--accent); }
+  thead th.sorted::after { content: ' ▼'; font-size: 0.6em; }
+  thead th.sorted.asc::after { content: ' ▲'; }
+
+  tbody tr {
+    border-bottom: 1px solid var(--border);
+    transition: background 0.15s;
+    animation: fadeIn 0.3s ease both;
+  }
+  tbody tr:last-child { border-bottom: none; }
+  tbody tr:hover { background: rgba(0,212,255,0.04); }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; } }
+
+  td {
+    padding: 11px 14px; font-size: 0.82rem; vertical-align: middle;
+    white-space: nowrap;
+  }
+
+  /* ── Ticker cell ── */
+  .ticker-cell {
+    font-family: var(--font-mono); font-weight: 700; font-size: 0.9rem;
+    color: var(--accent);
+  }
+  .rank-badge {
+    display: inline-block; width: 22px; height: 22px;
+    border-radius: 50%; background: var(--border);
+    font-size: 0.68rem; font-family: var(--font-mono);
+    text-align: center; line-height: 22px; color: var(--subtext);
+    margin-right: 6px;
+  }
+  .rank-1 { background: #ffd700; color: #000; }
+  .rank-2 { background: #c0c0c0; color: #000; }
+  .rank-3 { background: #cd7f32; color: #fff; }
+
+  /* ── Score bar ── */
+  .score-wrap { display: flex; align-items: center; gap: 8px; }
+  .score-bar-outer {
+    width: 80px; height: 6px; background: var(--border);
+    border-radius: 3px; overflow: hidden;
+  }
+  .score-bar-inner {
+    height: 100%; border-radius: 3px;
+    background: linear-gradient(90deg, #00e676, #00d4ff);
+    transition: width 0.6s ease;
+  }
+  .score-num { font-family: var(--font-mono); font-size: 0.78rem; color: var(--text); min-width: 28px; }
+
+  /* ── Confidence badge ── */
+  .conf-badge {
+    font-family: var(--font-mono); font-size: 0.72rem;
+    padding: 3px 8px; border-radius: 4px;
+    background: rgba(0,230,118,0.12); color: var(--green);
+    border: 1px solid rgba(0,230,118,0.25);
+  }
+
+  /* ── RSI color ── */
+  .rsi-low  { color: var(--green); }
+  .rsi-mid  { color: var(--gold); }
+  .rsi-high { color: var(--red); }
+
+  /* ── MACD ── */
+  .macd-pos { color: var(--green); }
+  .macd-neg { color: var(--red); }
+
+  /* ── News tooltip ── */
+  .news-cell { position: relative; max-width: 240px; }
+  .news-preview {
+    overflow: hidden; text-overflow: ellipsis;
+    white-space: nowrap; color: var(--subtext);
+    font-size: 0.75rem; cursor: pointer;
+  }
+  .news-preview:hover { color: var(--text); }
+  .news-tooltip {
+    display: none; position: absolute; left: 0; top: calc(100% + 4px); z-index: 100;
+    background: #1a2535; border: 1px solid var(--border);
+    border-radius: 8px; padding: 12px 14px; width: 320px;
+    font-size: 0.75rem; line-height: 1.6;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+    white-space: normal;
+  }
+  .news-cell:hover .news-tooltip { display: block; }
+
+  /* ── Date group separator ── */
+  tr.date-sep td {
+    background: rgba(0,212,255,0.06);
+    font-family: var(--font-mono); font-size: 0.7rem;
+    color: var(--accent); letter-spacing: 0.1em;
+    padding: 6px 14px; border-bottom: 1px solid var(--border);
+    border-top: 2px solid rgba(0,212,255,0.2);
+  }
+
+  /* ── Empty state ── */
+  .empty {
+    padding: 80px 24px; text-align: center; color: var(--muted);
+  }
+  .empty .icon { font-size: 3rem; margin-bottom: 12px; }
+  .empty p { font-size: 0.9rem; }
+
+  /* ── Config panel ── */
+  .config-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 12px; margin-bottom: 32px;
+  }
+  .config-card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 8px; padding: 12px 14px;
+  }
+  .config-card .key {
+    font-family: var(--font-mono); font-size: 0.65rem;
+    color: var(--subtext); text-transform: uppercase;
+    letter-spacing: 0.08em; margin-bottom: 4px;
+  }
+  .config-card .val {
+    font-family: var(--font-mono); font-size: 0.88rem; color: var(--accent);
+  }
+
+  /* ── Loading overlay ── */
+  #loading {
+    position: fixed; inset: 0; background: rgba(10,14,23,0.85);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 999; flex-direction: column; gap: 12px;
+    font-family: var(--font-mono); color: var(--accent);
+  }
+  .spinner {
+    width: 36px; height: 36px;
+    border: 3px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  footer {
+    margin-top: 48px; text-align: center;
+    font-size: 0.72rem; color: var(--muted);
+    font-family: var(--font-mono); line-height: 1.8;
+  }
+
+  @media (max-width: 768px) {
+    .hide-mobile { display: none; }
+    td, th { padding: 10px 8px; }
+  }
+</style>
+</head>
+<body>
+
+<div id="loading">
+  <div class="spinner"></div>
+  <span>กำลังโหลดข้อมูล…</span>
+</div>
+
+<div class="wrapper">
+
+  <header>
+    <div class="logo-block">
+      <div class="logo-title">◈ RUSSELL 1000 SCANNER</div>
+      <div class="logo-sub">Long-Term • Fund & Tech Filter • History Dashboard</div>
+    </div>
+    <div class="header-meta">
+      <div class="stat-pill">
+        <span class="num" id="stat-days">—</span>
+        <span class="lbl">วันที่สแกน</span>
+      </div>
+      <div class="stat-pill">
+        <span class="num" id="stat-records">—</span>
+        <span class="lbl">ระเบียนทั้งหมด</span>
+      </div>
+      <div class="stat-pill">
+        <span class="num" id="stat-tickers">—</span>
+        <span class="lbl">Ticker ไม่ซ้ำ</span>
+      </div>
+    </div>
+  </header>
+
+  <div class="config-grid" id="config-grid"></div>
+
+  <div class="filter-bar">
+    <label>🔍</label>
+    <input type="text" id="search" placeholder="ค้นหา Ticker…">
+    <label>วันที่</label>
+    <input type="date" id="filter-date">
+    <label>เรียงโดย</label>
+    <select id="sort-col">
+      <option value="date">วันที่</option>
+      <option value="composite">Composite Score</option>
+      <option value="score">Tech Score</option>
+      <option value="confidence">Sentiment</option>
+      <option value="rsi">RSI</option>
+    </select>
+    <select id="sort-dir">
+      <option value="desc">มากไปน้อย</option>
+      <option value="asc">น้อยไปมาก</option>
+    </select>
+  </div>
+
+  <div class="table-wrap">
+    <table id="main-table">
+      <thead>
+        <tr>
+          <th>วันที่</th>
+          <th>#</th>
+          <th>Ticker</th>
+          <th>Tech Score</th>
+          <th>Sentiment</th>
+          <th>Composite</th>
+          <th>ราคาตอนสแกน</th>
+          <th>ราคาปัจจุบัน</th>
+          <th>เปลี่ยนแปลง</th>
+          <th class="hide-mobile">RSI</th>
+          <th class="hide-mobile">ADX</th>
+          <th class="hide-mobile">MACD Hist</th>
+          <th class="hide-mobile">ห่าง 52W High</th>
+          <th class="hide-mobile">Valuation</th>
+          <th class="hide-mobile">Sector</th>
+          <th class="hide-mobile">R:R Ratio</th>
+          <th class="hide-mobile">Stop Loss</th>
+          <th>ข่าว</th>
+        </tr>
+      </thead>
+      <tbody id="table-body">
+      </tbody>
+    </table>
+  </div>
+
+  <footer>
+    <p>⚠️ ข้อมูลนี้เพื่อการศึกษาเท่านั้น ไม่ใช่คำแนะนำการลงทุน</p>
+    <p>Russell 1000 Scanner Bot — Render + Hugging Face + Google Sheets</p>
+  </footer>
+</div>
+
+<script>
+const CONFIG = {{ config | tojson }};
+const RAW    = {{ rows | tojson }};
+
+// ── Config display ───────────────────────────
+const configGrid = document.getElementById('config-grid');
+const cfgItems = [
+  ['Fundamentals', CONFIG.layer0_fund],
+  ['Trend',        CONFIG.layer1_trend],
+  ['ADX / RSI',    CONFIG.layer1_adx + " / " + CONFIG.layer2_rsi],
+  ['MACD',         CONFIG.layer2_macd],
+  ['Volume',       CONFIG.layer3_volume],
+  ['Valuation',    CONFIG.valuation_filter],
+  ['Max/Sector',   CONFIG.max_per_sector],
+  ['Stop Loss',    CONFIG.stop_loss],
+  ['Pos Size',     CONFIG.position_size],
+];
+cfgItems.forEach(([k,v]) => {
+  configGrid.innerHTML += `
+    <div class="config-card">
+      <div class="key">${k}</div>
+      <div class="val">${v}</div>
+    </div>`;
+});
+
+// ── Stats ────────────────────────────────────
+const uniqueDates   = new Set(RAW.map(r => r.date)).size;
+const uniqueTickers = new Set(RAW.map(r => r.ticker)).size;
+document.getElementById('stat-days').textContent    = uniqueDates;
+document.getElementById('stat-records').textContent = RAW.length;
+document.getElementById('stat-tickers').textContent = uniqueTickers;
+
+// ── Render table ─────────────────────────────
+function rsiClass(v) {
+  if (v <= 50) return 'rsi-low';
+  if (v <= 60) return 'rsi-mid';
+  return 'rsi-high';
+}
+function scoreColor(s) {
+  if (s >= 9) return '#ffd700';
+  if (s >= 8) return '#00e676';
+  if (s >= 7) return '#00d4ff';
+  return '#8899aa';
+}
+
+let currentData = [...RAW];
+
+function renderTable(data) {
+  const tbody = document.getElementById('table-body');
+  if (!data.length) {
+    tbody.innerHTML = `<tr><td colspan="16">
+      <div class="empty">
+        <div class="icon">📭</div>
+        <p>ไม่พบข้อมูลที่ตรงกับเกณฑ์</p>
+      </div>
+    </td></tr>`;
+    return;
+  }
+
+  let html = '';
+  let lastDate = null;
+
+  data.forEach((r, i) => {
+    // Date separator
+    if (r.date !== lastDate) {
+      html += `<tr class="date-sep"><td colspan="16">📅  ${r.date}</td></tr>`;
+      lastDate = r.date;
+    }
+
+    const rankBadge = r.rank <= 3
+      ? `<span class="rank-badge rank-${r.rank}">${['🥇','🥈','🥉'][r.rank-1]}</span>`
+      : `<span class="rank-badge">${r.rank}</span>`;
+
+    const scoreW = (r.score / 10 * 100).toFixed(0);
+    const confPct = (r.confidence * 100).toFixed(0);
+    const macdClass = r.macd_hist >= 0 ? 'macd-pos' : 'macd-neg';
+    const macdSign  = r.macd_hist >= 0 ? '+' : '';
+
+    const headlines = String(r.headlines || '').split(' | ');
+    const newsPreview = headlines[0] || '—';
+    const newsFull = headlines.map((h,i) => `${i+1}. ${h}`).join('<br>');
+
+    // ── ราคาปัจจุบัน + % เปลี่ยนแปลง ──────────────────────────────────────
+    const curPrice  = parseFloat(r.current_price);
+    const changePct = parseFloat(r.change_pct);
+    const curPriceStr = isNaN(curPrice)
+      ? '<span style="color:var(--muted)">—</span>'
+      : `$${curPrice.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}`;
+    let changePctStr = '<span style="color:var(--muted)">—</span>';
+    if (!isNaN(changePct)) {
+      const sign  = changePct >= 0 ? '+' : '';
+      const color = changePct >= 0 ? 'var(--green)' : 'var(--red)';
+      const arrow = changePct >= 0 ? '▲' : '▼';
+      changePctStr = `<span style="font-family:var(--font-mono);color:${color};font-weight:700">${arrow} ${sign}${changePct.toFixed(2)}%</span>`;
+    }
+
+    html += `<tr style="animation-delay:${i*20}ms">
+      <td style="font-family:var(--font-mono);font-size:0.75rem;color:var(--subtext)">${r.date}</td>
+      <td>${rankBadge}</td>
+      <td class="ticker-cell">$${r.ticker}</td>
+      <td>
+        <div class="score-wrap">
+          <div class="score-bar-outer">
+            <div class="score-bar-inner" style="width:${scoreW}%;background:linear-gradient(90deg,${scoreColor(r.score)},${scoreColor(r.score)}88)"></div>
+          </div>
+          <span class="score-num" style="color:${scoreColor(r.score)}">${r.score}/10</span>
+        </div>
+      </td>
+      <td><span class="conf-badge">🟢 ${confPct}%</span></td>
+      <td style="font-family:var(--font-mono);font-weight:700;color:var(--gold)">${(parseFloat(r.composite) || 0).toFixed(2)}</td>
+      <td style="font-family:var(--font-mono);color:var(--subtext)">$${parseFloat(r.price||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
+      <td style="font-family:var(--font-mono)">${curPriceStr}</td>
+      <td>${changePctStr}</td>
+      <td class="hide-mobile ${rsiClass(r.rsi)}" style="font-family:var(--font-mono)">${r.rsi}</td>
+      <td class="hide-mobile" style="font-family:var(--font-mono)">${r.adx}</td>
+      <td class="hide-mobile ${macdClass}" style="font-family:var(--font-mono)">${macdSign}${parseFloat(r.macd_hist||0).toFixed(4)}</td>
+      <td class="hide-mobile" style="font-family:var(--font-mono);color:var(--subtext)">-${r.pct_from_52w}%</td>
+      <td class="hide-mobile" style="font-family:var(--font-mono)">${r.valuation_flag === 'cheap' ? '🟢 Cheap' : (r.valuation_flag === 'expensive' ? '🔴 Exp' : '🟡 Fair')}</td>
+      <td class="hide-mobile"><span style="font-size:0.7rem;background:var(--border);padding:2px 6px;border-radius:4px;color:var(--text)">${r.sector || 'Unknown'}</span></td>
+      <td class="hide-mobile" style="font-family:var(--font-mono)">1:${parseFloat(r.rr_ratio||0).toFixed(1)}</td>
+      <td class="hide-mobile" style="font-family:var(--font-mono);color:var(--red)">$${parseFloat(r.stop_loss||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
+      <td class="news-cell">
+        <div class="news-preview">${newsPreview}</div>
+        <div class="news-tooltip">${newsFull}</div>
+      </td>
+    </tr>`;
+  });
+
+  tbody.innerHTML = html;
+}
+
+// ── Filter & Sort ────────────────────────────
+function applyFilters() {
+  const search  = document.getElementById('search').value.toLowerCase();
+  const dateVal = document.getElementById('filter-date').value;
+  const sortCol = document.getElementById('sort-col').value;
+  const sortDir = document.getElementById('sort-dir').value;
+
+  let data = [...RAW];
+
+  if (search) data = data.filter(r => r.ticker.toLowerCase().includes(search));
+  if (dateVal) data = data.filter(r => r.date === dateVal);
+
+  const multiplier = sortDir === 'desc' ? -1 : 1;
+  data.sort((a, b) => {
+    let av = a[sortCol], bv = b[sortCol];
+    let cmp;
+    if (typeof av === 'string') cmp = av.localeCompare(bv) * multiplier;
+    else cmp = (av - bv) * multiplier;
+    // secondary sort: ถ้า primary เท่ากัน ให้เรียง rank 1→5 เสมอ
+    if (cmp === 0) return (a.rank || 0) - (b.rank || 0);
+    return cmp;
+  });
+
+  renderTable(data);
+}
+
+['search','filter-date','sort-col','sort-dir'].forEach(id => {
+  document.getElementById(id).addEventListener('input', applyFilters);
+});
+
+// ── Initial render ───────────────────────────
+renderTable(RAW);
+document.getElementById('loading').style.display = 'none';
+</script>
+</body>
+</html>"""
+
+
+# ══════════════════════════════════════════════

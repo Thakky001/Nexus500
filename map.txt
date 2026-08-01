@@ -1,0 +1,14 @@
+11: TELEGRAM_BOT_TOKEN
+49: TELEGRAM_BOT_TOKEN
+145: def get_gsheet():
+309: def get_1000_tickers(
+556: def check_fundamentals(
+627: def fetch_news(
+709: def send_telegram(
+710: TELEGRAM_BOT_TOKEN
+808: def diversify_results(
+832: def run_scan(
+946: DASHBOARD_HTML =
+1448: @app.route("/")
+1482: TELEGRAM_BOT_TOKEN
+1509: if __name__ == "__main__":

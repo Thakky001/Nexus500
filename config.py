@@ -1,0 +1,43 @@
+import os
+
+TELEGRAM_BOT_TOKEN          = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_CHAT_ID            = os.environ.get("TELEGRAM_CHAT_ID", "")
+HF_API_TOKEN                = os.environ.get("HF_API_TOKEN", "")
+GOOGLE_SHEET_ID             = os.environ.get("GOOGLE_SHEET_ID", "")
+GOOGLE_SERVICE_ACCOUNT_JSON = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON", "")
+PORTFOLIO_VALUE             = float(os.environ.get("PORTFOLIO_VALUE", "10000"))
+
+HF_MODEL_URL = "https://router.huggingface.co/hf-inference/models/ProsusAI/finbert"
+
+MIN_ROE           = 0.15
+MAX_DEBT_EQUITY   = 150.0
+MIN_PROFIT_MARGIN = 0.10
+MAX_PE_RATIO      = 40.0
+MAX_PEG_RATIO     = 2.5
+MIN_ADX           = 20
+EMA_SLOPE_DAYS    = 20
+MIN_EMA50_SLOPE   = 0.0
+RSI_LOW           = 40
+RSI_HIGH          = 70
+MIN_MACD_HIST     = -0.5
+MIN_AVG_VOLUME    = 2_000_000
+MIN_VOL_SURGE     = 0.0
+MAX_PCT_FROM_52W  = 20.0
+MIN_5D_MOMENTUM   = -5.0
+
+FIB_LEVELS = [0.236, 0.382, 0.500]
+
+STOP_LOSS_PCT       = 3.0
+TRAIL_STOP_ATR_MULT = 2.0
+TAKE_PROFIT_PCT     = 30.0
+MAX_RISK_PER_TRADE  = 2.0
+MAX_POSITION_PCT    = 25.0
+MAX_PER_SECTOR      = 2
+
+MIN_SCORE         = 6
+TOP_N             = 5
+CHUNK_SIZE        = 50
+CHUNK_PAUSE       = 10
+NEWS_PAUSE        = 5
+AI_PAUSE          = 20
+AI_RETRY_WAIT     = 60

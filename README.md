@@ -9,7 +9,7 @@
 ## ภาพรวมระบบ
 
 ```
-Wikipedia → รายชื่อหุ้น Russell 1000 (~1000 ตัว)
+SEC API → รายชื่อหุ้นอเมริกาทั้งหมด (ดึงเฉพาะ Top 5,000 ตัวแรก)
     ↓
 yfinance → กราฟย้อนหลัง 1 ปี (ทีละ 50 ตัว)
     ↓
@@ -195,12 +195,25 @@ https://docs.google.com/spreadsheets/d/  [SHEET_ID_อยู่ตรงนี�
 
 ### 4.3 อัปโหลดไฟล์
 
-ต้องการ 2 ไฟล์:
+ต้องการไฟล์และโฟลเดอร์ทั้งหมดนี้:
 
 ```
 r1000-bot/
 ├── app.py
-└── requirements.txt
+├── config.py
+├── logger.py
+├── requirements.txt
+├── .gitignore
+├── core/
+│   ├── fundamental.py
+│   ├── orchestrator.py
+│   ├── sentiment.py
+│   └── technical.py
+├── services/
+│   ├── sheets.py
+│   └── telegram.py
+└── templates/
+    └── dashboard.html
 ```
 
 **วิธีผ่านเว็บ GitHub (ไม่ต้องติดตั้งอะไร)**
