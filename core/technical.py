@@ -2,7 +2,7 @@ import time
 import io
 import requests
 import pandas as pd
-import pandas_ta as ta
+import pandas_ta_classic as ta
 import yfinance as yf
 from config import *
 from logger import log
