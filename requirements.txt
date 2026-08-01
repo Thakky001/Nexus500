@@ -1,7 +1,7 @@
 flask==3.0.3
 yfinance>=1.0.0
 pandas>=2.2.0
-pandas-ta-classic
+pandas-ta
 requests==2.32.3
 lxml==5.2.2
 numpy>=2.0.0
