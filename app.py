@@ -1,9 +1,10 @@
 from flask import Flask, jsonify, render_template
-from threading import Thread
+import threading
 import os
 
 from config import *
 from core.orchestrator import run_scan
+from services.sheets import read_sheet_data
 
 app = Flask(__name__)
 
@@ -29,7 +30,7 @@ def index():
         "stop_loss":        f"EMA200 -{STOP_LOSS_PCT}%",
         "position_size":    f"Max Risk {MAX_RISK_PER_TRADE}% / Max Pos {MAX_POSITION_PCT}%",
     }
-    return render_template_string(DASHBOARD_HTML, rows=rows, config=config)
+    return render_template("dashboard.html", rows=rows, config=config)
 
 
 @app.route("/api/history")
