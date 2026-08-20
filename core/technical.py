@@ -7,6 +7,34 @@ import yfinance as yf
 from config import *
 from logger import log
 
+# ── SPY data สำหรับ Relative Strength (โหลดครั้งเดียวต่อ 1 scan run) ─────
+_spy_df_cache = None
+
+
+def _get_spy_df() -> pd.DataFrame:
+    """โหลด SPY data แบบ lazy cache — ดึงครั้งเดียวตลอดการสแกน"""
+    global _spy_df_cache
+    if _spy_df_cache is not None and len(_spy_df_cache) > 0:
+        return _spy_df_cache
+    try:
+        df = yf.download("SPY", period="1y", interval="1d",
+                         auto_adjust=True, progress=False, threads=False)
+        if df is not None and len(df) >= RS_PERIOD:
+            _spy_df_cache = df
+            log.info(f"[RS] โหลด SPY สำเร็จ: {len(df)} วัน")
+        else:
+            _spy_df_cache = pd.DataFrame()
+    except Exception as e:
+        log.warning(f"[RS] โหลด SPY ล้มเหลว: {e}")
+        _spy_df_cache = pd.DataFrame()
+    return _spy_df_cache
+
+
+def reset_spy_cache():
+    """เรียกตอนเริ่ม run_scan() ใหม่แต่ละรอบ เพื่อล้าง cache"""
+    global _spy_df_cache
+    _spy_df_cache = None
+
 def get_sp500_tickers() -> list:
     """ฟังก์ชันสำรอง กรณีโหลด 1000 ตัวล้มเหลว"""
     url = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
@@ -77,7 +105,7 @@ def get_1000_tickers() -> list:
 # ══════════════════════════════════════════════
 #  STEP 2 — คัดกรอง 4 ชั้น + Scoring (Technical)
 # ══════════════════════════════════════════════
-def score_stock(df: pd.DataFrame) -> tuple:
+def score_stock(df: pd.DataFrame, rsi_low: int = RSI_LOW, rsi_high: int = RSI_HIGH) -> tuple:
     score   = 0
     details = {}
 
@@ -203,7 +231,7 @@ def score_stock(df: pd.DataFrame) -> tuple:
         score += 1; details["bonus_adx"] = True
 
     # ชั้น 2 — Momentum
-    if not (RSI_LOW <= rsi_val <= RSI_HIGH):
+    if not (rsi_low <= rsi_val <= rsi_high):
         details["fail"] = f"RSI ออกนอก Zone ({rsi_val:.1f})"; return -1, details
     if macd_hist <= MIN_MACD_HIST:
         details["fail"] = f"MACD Hist ต่ำ ({macd_hist:.4f})"; return -1, details
@@ -224,10 +252,41 @@ def score_stock(df: pd.DataFrame) -> tuple:
     if momentum_5d >= MIN_5D_MOMENTUM:
         score += 1; details["pass_5d_mom"] = True
 
+    # ── Timing Signal ──────────────────────────────────────────────────────
+    pct_above_ema20 = ((price - e20) / e20 * 100) if e20 > 0 else 0.0
+
+    if rsi_val <= TIMING_BUY_RSI_MAX and pct_above_ema20 <= TIMING_BUY_PCT_EMA20_MAX:
+        timing = "🟢 BUY NOW"     # ราคาใกล้ EMA20 Support + RSI ไม่สูง
+    elif rsi_val >= TIMING_EXT_RSI_MIN or pct_above_ema20 >= TIMING_EXT_PCT_EMA20_MIN:
+        timing = "🔴 EXTENDED"    # RSI สูงเกินหรือราคาห่าง EMA20 มาก
+    else:
+        timing = "🟡 WAIT"        # หุ้นดีแต่ยังไม่ย่อพอ
+
+    details["timing_signal"]   = timing
+    details["pct_above_ema20"] = round(pct_above_ema20, 2)
+
+    # ── Relative Strength vs SPY ───────────────────────────────────────────
+    rs_vs_spy  = 0.0
+    rs_bonus   = 0
+    spy_df     = _get_spy_df()
+    if not spy_df.empty and len(spy_df) >= RS_PERIOD and len(close) >= RS_PERIOD:
+        try:
+            stock_ret = (float(close.iloc[-1]) / float(close.iloc[-RS_PERIOD]) - 1) * 100
+            spy_ret   = (float(spy_df["Close"].iloc[-1]) / float(spy_df["Close"].iloc[-RS_PERIOD]) - 1) * 100
+            rs_vs_spy = round(stock_ret - spy_ret, 2)
+            rs_bonus  = 1 if rs_vs_spy > 0 else 0
+        except Exception:
+            pass
+
+    details["rs_vs_spy"] = rs_vs_spy
+    details["rs_bonus"]  = rs_bonus
+    
+    score += rs_bonus
+
     return score, details
 
 
-def fetch_and_filter(tickers: list) -> list:
+def fetch_and_filter(tickers: list, min_score: int = MIN_SCORE, rsi_low: int = RSI_LOW, rsi_high: int = RSI_HIGH) -> list:
     passed = []
     chunks = [tickers[i: i + CHUNK_SIZE] for i in range(0, len(tickers), CHUNK_SIZE)]
 
@@ -264,19 +323,20 @@ def fetch_and_filter(tickers: list) -> list:
                 if len(df) < 215:
                     continue
 
-                score, details = score_stock(df)
+                score, details = score_stock(df, rsi_low=rsi_low, rsi_high=rsi_high)
 
-                if score >= MIN_SCORE:
+                if score >= min_score:
                     passed.append({"ticker": ticker, "score": score, **details})
                     log.info(
                         f"  ✅ {ticker} Score:{score}/10 | "
                         f"RSI:{details['rsi']} ADX:{details['adx']} "
-                        f"MACDh:{details['macd_hist']} 5dM:{details['momentum_5d']}%"
+                        f"MACDh:{details['macd_hist']} 5dM:{details['momentum_5d']}% "
+                        f"RS:{details.get('rs_vs_spy', 0):+.1f}% {details.get('timing_signal','')}"
                     )
                 elif score == -1:
                     log.debug(f"  ❌ {ticker} — {details.get('fail','?')}")
                 else:
-                    log.debug(f"  ⚠️ {ticker} Score:{score} (ต่ำกว่า {MIN_SCORE})")
+                    log.debug(f"  ⚠️ {ticker} Score:{score} (ต่ำกว่า {min_score})")
 
             except Exception as e:
                 log.debug(f"  ❌ {ticker}: {e}")
@@ -286,7 +346,7 @@ def fetch_and_filter(tickers: list) -> list:
             time.sleep(CHUNK_PAUSE)
 
     passed.sort(key=lambda x: x["score"], reverse=True)
-    log.info(f"ผ่านเกณฑ์ทั้งหมด: {len(passed)} ตัว (Score >= {MIN_SCORE})")
+    log.info(f"ผ่านเกณฑ์ทั้งหมด: {len(passed)} ตัว (Score >= {min_score})")
     return passed
 
 

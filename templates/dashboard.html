@@ -85,9 +85,9 @@
   /* ── Table ── */
   .table-wrap {
     background: var(--surface); border: 1px solid var(--border);
-    border-radius: 12px; overflow: hidden;
+    border-radius: 12px; overflow-x: auto; -webkit-overflow-scrolling: touch;
   }
-  table { width: 100%; border-collapse: collapse; }
+  table { width: 100%; border-collapse: collapse; min-width: 800px; }
   thead th {
     background: #0d1520; padding: 12px 14px;
     font-family: var(--font-mono); font-size: 0.68rem;
@@ -119,6 +119,10 @@
   .ticker-cell {
     font-family: var(--font-mono); font-weight: 700; font-size: 0.9rem;
     color: var(--accent);
+    position: sticky; left: 0; background: var(--surface); z-index: 2;
+  }
+  th.ticker-th {
+    position: sticky; left: 0; background: #0d1520; z-index: 3;
   }
   .rank-badge {
     display: inline-block; width: 22px; height: 22px;
@@ -239,6 +243,11 @@
   @media (max-width: 768px) {
     .hide-mobile { display: none; }
     td, th { padding: 10px 8px; }
+    header { flex-direction: column; align-items: flex-start; }
+    .header-meta { width: 100%; justify-content: flex-start; }
+    .stat-pill { flex: 1; }
+    .wrapper { padding: 16px 12px; }
+    .filter-bar input, .filter-bar select { width: 100%; }
   }
 </style>
 </head>
@@ -297,13 +306,13 @@
     <table id="main-table">
       <thead>
         <tr>
-          <th>วันที่</th>
+          <th class="hide-mobile">วันที่</th>
           <th>#</th>
-          <th>Ticker</th>
+          <th class="ticker-th">Ticker</th>
           <th>Tech Score</th>
           <th>Sentiment</th>
           <th>Composite</th>
-          <th>ราคาตอนสแกน</th>
+          <th class="hide-mobile">ราคาตอนสแกน</th>
           <th>ราคาปัจจุบัน</th>
           <th>เปลี่ยนแปลง</th>
           <th class="hide-mobile">RSI</th>
@@ -425,7 +434,7 @@ function renderTable(data) {
     }
 
     html += `<tr style="animation-delay:${i*20}ms">
-      <td style="font-family:var(--font-mono);font-size:0.75rem;color:var(--subtext)">${r.date}</td>
+      <td class="hide-mobile" style="font-family:var(--font-mono);font-size:0.75rem;color:var(--subtext)">${r.date}</td>
       <td>${rankBadge}</td>
       <td class="ticker-cell">$${r.ticker}</td>
       <td>
@@ -438,7 +447,7 @@ function renderTable(data) {
       </td>
       <td><span class="conf-badge">🟢 ${confPct}%</span></td>
       <td style="font-family:var(--font-mono);font-weight:700;color:var(--gold)">${(parseFloat(r.composite) || 0).toFixed(2)}</td>
-      <td style="font-family:var(--font-mono);color:var(--subtext)">$${parseFloat(r.price||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
+      <td class="hide-mobile" style="font-family:var(--font-mono);color:var(--subtext)">$${parseFloat(r.price||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
       <td style="font-family:var(--font-mono)">${curPriceStr}</td>
       <td>${changePctStr}</td>
       <td class="hide-mobile ${rsiClass(r.rsi)}" style="font-family:var(--font-mono)">${r.rsi}</td>

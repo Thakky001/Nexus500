@@ -12,10 +12,13 @@ def fetch_news(ticker: str, max_items: int = 8) -> list:
         resp.raise_for_status()
         from lxml import etree
         root  = etree.fromstring(resp.content)
-        items = root.findall(".//item/title")
+        items = root.findall(".//item")
         for item in items[:max_items]:
-            if item.text:
-                headlines.append(item.text.strip())
+            title = item.findtext("title", "").strip()
+            desc  = item.findtext("description", "").strip()
+            if title:
+                full_text = f"{title}. {desc}" if desc else title
+                headlines.append(full_text)
     except Exception as e:
         log.debug(f"ดึงข่าว {ticker} ล้มเหลว: {e}")
     return headlines
@@ -63,21 +66,28 @@ def analyze_sentiment(headlines: list) -> tuple:
     label_counts = {"positive": 0, "negative": 0, "neutral": 0}
     total_conf   = {"positive": 0.0, "negative": 0.0, "neutral": 0.0}
     
-    for r in results_per_headline:
-        label_counts[r["label"]] += 1
-        total_conf[r["label"]]   += r["score"]
+    # น้ำหนักตามลำดับ: ข่าวล่าสุด = 1.0, ข่าวสุดท้าย = 0.5
+    num_results = len(results_per_headline)
+    weights = [1.0 - (i * 0.5 / max(num_results - 1, 1)) for i in range(num_results)]
+
+    for idx, r in enumerate(results_per_headline):
+        w = weights[idx]
+        label_counts[r["label"]] += w
+        total_conf[r["label"]]   += r["score"] * w
     
     majority_label = max(label_counts, key=label_counts.get)
-    count          = label_counts[majority_label]
-    avg_confidence = total_conf[majority_label] / count if count > 0 else 0.0
+    count_weight   = label_counts[majority_label]
+    avg_confidence = total_conf[majority_label] / count_weight if count_weight > 0 else 0.0
     
-    sentiment_ratio = label_counts["positive"] / len(results_per_headline)
+    # ratio คิดแบบถ่วงน้ำหนัก
+    total_weight = sum(weights)
+    sentiment_ratio = label_counts["positive"] / total_weight if total_weight > 0 else 0.0
     
     breakdown = {
-        "positive": label_counts["positive"],
-        "negative": label_counts["negative"],
-        "neutral": label_counts["neutral"],
-        "ratio": sentiment_ratio
+        "positive": round(label_counts["positive"], 1),
+        "negative": round(label_counts["negative"], 1),
+        "neutral": round(label_counts["neutral"], 1),
+        "ratio": round(sentiment_ratio, 2)
     }
     
     return majority_label, avg_confidence, breakdown

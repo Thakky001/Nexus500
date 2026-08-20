@@ -41,3 +41,35 @@ CHUNK_PAUSE       = 10
 NEWS_PAUSE        = 5
 AI_PAUSE          = 20
 AI_RETRY_WAIT     = 60
+
+# ── Market Regime ────────────────────────────────────────
+REGIME_BULL_MIN_SCORE    = 6   # MIN_SCORE ปกติ
+REGIME_CAUTION_MIN_SCORE = 7   # ตลาดระวัง → เกณฑ์เข้มขึ้น
+REGIME_BEAR_MIN_SCORE    = 8   # ตลาดขาลง → เกณฑ์เข้มสุด
+
+REGIME_BULL_RSI    = (35, 75)
+REGIME_CAUTION_RSI = (38, 68)
+REGIME_BEAR_RSI    = (30, 55)
+
+# ── Sector Money Flow ────────────────────────────────────
+SECTOR_FLOW_THRESHOLD = 5.0 # ถ้า <= -5% คือไหลออก, >= 5% คือไหลเข้า
+
+# ── Timing Signal Thresholds ─────────────────────────────
+TIMING_BUY_RSI_MAX       = 50   # RSI ≤ 50 → ไม่ Overbought
+TIMING_BUY_PCT_EMA20_MAX = 2.0  # ราคาห่าง EMA20 ≤ 2% → ยังไม่ Extended
+TIMING_EXT_RSI_MIN       = 65   # RSI ≥ 65 → Extended
+TIMING_EXT_PCT_EMA20_MIN = 8.0  # ราคาห่าง EMA20 ≥ 8% → Extended
+
+# ── Relative Strength ────────────────────────────────────
+RS_PERIOD = 63  # ~3 เดือน
+
+# ── Historical Consistency ───────────────────────────────
+STREAK_LOOKBACK_DAYS = 30   # ดูย้อนหลัง 30 วัน
+MAX_STREAK_BONUS     = 3    # Bonus สูงสุด 3 คะแนน
+
+# ── Analyst Consensus ────────────────────────────────────
+MIN_ANALYST_UPSIDE  = 15.0  # Upside % ที่ถือว่าน่าสนใจ
+MIN_ANALYST_COUNT   = 10    # จำนวน Analyst ขั้นต่ำที่น่าเชื่อถือ
+
+# ── Insider Activity ─────────────────────────────────────
+INSIDER_LOOKBACK_DAYS = 90  # ดู Insider transaction ย้อนหลัง 90 วัน

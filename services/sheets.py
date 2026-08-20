@@ -27,6 +27,16 @@ SHEET_HEADERS = [
     "position_shares", "position_amount", "position_risk",
     "valuation_score",
     "sentiment_pos", "sentiment_neg", "sentiment_neu",
+    # ── Features ใหม่ ──
+    "timing_signal", "pct_above_ema20",
+    "rs_vs_spy",
+    "analyst_rec", "target_price", "upside_pct", "num_analysts", "analyst_score",
+    "days_to_earnings", "earnings_warning",
+    "fcf_positive", "rev_growing", "quality_score",
+    "insider_action", "insider_score",
+    "appearance_streak", "streak_bonus",
+    "sector_flow", "sector_flow_score",
+    "market_regime",
 ]
 
 def get_gsheet():
@@ -70,7 +80,7 @@ def get_gsheet():
         return None
 
 
-def save_to_sheet(results: list, scan_date: str):
+def save_to_sheet(results: list, scan_date: str, market_regime: str = "bull"):
     """
     บันทึก Top N ลง Google Sheets
     results = list of (stock_dict, headlines_list, confidence_float, composite_float, sentiment_breakdown)
@@ -86,7 +96,7 @@ def save_to_sheet(results: list, scan_date: str):
         else:
             stock, headlines, confidence, composite = item
             sent_bk = {"positive": 0, "negative": 0, "neutral": 0}
-            
+
         rows.append([
             scan_date,
             stock["ticker"],
@@ -112,10 +122,10 @@ def save_to_sheet(results: list, scan_date: str):
             " | ".join(headlines),
             '=IFERROR(GOOGLEFINANCE(INDIRECT("B"&ROW()),"price"),"")',
             '=IFERROR((INDIRECT("W"&ROW())-INDIRECT("D"&ROW()))/INDIRECT("D"&ROW())*100,"")',
-            stock.get("roe", ""),            
-            stock.get("debt_equity", ""),    
-            stock.get("profit_margin", ""),  
-            stock.get("div_yield", ""),      
+            stock.get("roe", ""),
+            stock.get("debt_equity", ""),
+            stock.get("profit_margin", ""),
+            stock.get("div_yield", ""),
             stock.get("pe_ratio", ""),
             stock.get("forward_pe", ""),
             stock.get("peg_ratio", ""),
@@ -139,6 +149,27 @@ def save_to_sheet(results: list, scan_date: str):
             sent_bk.get("positive", 0),
             sent_bk.get("negative", 0),
             sent_bk.get("neutral", 0),
+            # ── Features ใหม่ ──
+            stock.get("timing_signal", ""),
+            stock.get("pct_above_ema20", ""),
+            stock.get("rs_vs_spy", ""),
+            stock.get("analyst_rec", ""),
+            stock.get("target_price", ""),
+            stock.get("upside_pct", ""),
+            stock.get("num_analysts", ""),
+            stock.get("analyst_score", ""),
+            stock.get("days_to_earnings", ""),
+            stock.get("earnings_warning", ""),
+            stock.get("fcf_positive", ""),
+            stock.get("rev_growing", ""),
+            stock.get("quality_score", ""),
+            stock.get("insider_action", ""),
+            stock.get("insider_score", ""),
+            stock.get("appearance_streak", ""),
+            stock.get("streak_bonus", ""),
+            stock.get("sector_flow", ""),
+            stock.get("sector_flow_score", ""),
+            market_regime,
         ])
 
     try:
@@ -176,5 +207,31 @@ def read_sheet_data(limit: int = 200) -> list:
 
 
 # ══════════════════════════════════════════════
-#  STEP 1 — โหลดรายชื่อ Russell 1000 (ประมาณ 1000 ตัว)
+#  Historical Consistency — นับวันที่หุ้นปรากฏในผลสแกน
+# ══════════════════════════════════════════════
 
+def get_ticker_streak(ticker: str, lookback_days: int = 30) -> int:
+    """
+    นับจำนวนวัน (ไม่ซ้ำ) ที่หุ้นตัวนี้ปรากฏในผลสแกนภายใน lookback_days วันที่ผ่านมา
+    Return: จำนวนวัน (0 ถ้าไม่เคยปรากฏ หรือไม่มี Google Sheets)
+    """
+    from datetime import datetime, timezone, timedelta
+    ws = get_gsheet()
+    if ws is None:
+        return 0
+    try:
+        all_rows = ws.get_all_records()
+        cutoff   = (datetime.now(timezone.utc) - timedelta(days=lookback_days)).strftime("%Y-%m-%d")
+        dates_appeared = set()
+        for row in all_rows:
+            row_date   = str(row.get("date", ""))
+            row_ticker = str(row.get("ticker", ""))
+            if row_ticker == ticker and row_date >= cutoff:
+                dates_appeared.add(row_date)
+        count = len(dates_appeared)
+        if count > 0:
+            log.debug(f"[Streak] {ticker}: ปรากฏ {count} วัน ใน {lookback_days} วันที่ผ่านมา")
+        return count
+    except Exception as e:
+        log.debug(f"[Streak] ดึงข้อมูล {ticker} ล้มเหลว: {e}")
+        return 0
