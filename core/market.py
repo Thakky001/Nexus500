@@ -34,15 +34,26 @@ def detect_market_regime() -> dict:
         'rsi_range': REGIME_BULL_RSI,
     }
 
-    try:
-        df = yf.download(
-            'SPY', period='1y', interval='1d',
-            auto_adjust=True, progress=False, threads=False,
-        )
-        if df is None or len(df) < 210:
-            log.warning('[Market Regime] ข้อมูล SPY ไม่พอ — ใช้ค่าเริ่มต้น Bull')
-            return default
+    df = None
+    for attempt in range(3):
+        try:
+            df = yf.download(
+                'SPY', period='1y', interval='1d',
+                auto_adjust=True, progress=False, threads=False,
+            )
+            if df is not None and not df.empty and len(df) >= 210:
+                break
+        except Exception as e:
+            log.debug(f"[Market Regime] SPY attempt {attempt+1} failed: {e}")
+        
+        import time
+        time.sleep(5)  # รอ 5 วินาทีให้ yfinance รีเซ็ตคุกกี้
 
+    if df is None or len(df) < 210:
+        log.warning('[Market Regime] ข้อมูล SPY ไม่พอ (ลอง 3 ครั้งแล้ว) — ใช้ค่าเริ่มต้น Bull')
+        return default
+
+    try:
         close   = df['Close']
         high    = df['High']
         low     = df['Low']
