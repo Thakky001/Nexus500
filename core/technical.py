@@ -16,17 +16,21 @@ def _get_spy_df() -> pd.DataFrame:
     global _spy_df_cache
     if _spy_df_cache is not None and len(_spy_df_cache) > 0:
         return _spy_df_cache
-    try:
-        df = yf.download("SPY", period="1y", interval="1d",
-                         auto_adjust=True, progress=False, threads=False)
-        if df is not None and len(df) >= RS_PERIOD:
-            _spy_df_cache = df
-            log.info(f"[RS] โหลด SPY สำเร็จ: {len(df)} วัน")
-        else:
-            _spy_df_cache = pd.DataFrame()
-    except Exception as e:
-        log.warning(f"[RS] โหลด SPY ล้มเหลว: {e}")
-        _spy_df_cache = pd.DataFrame()
+        
+    for attempt in range(3):
+        try:
+            df = yf.download("SPY", period="1y", interval="1d",
+                             auto_adjust=True, progress=False, threads=False)
+            if df is not None and len(df) >= RS_PERIOD:
+                _spy_df_cache = df
+                log.info(f"[RS] โหลด SPY สำเร็จ: {len(df)} วัน")
+                return _spy_df_cache
+        except Exception as e:
+            log.warning(f"[RS] โหลด SPY ล้มเหลวรอบที่ {attempt+1}: {e}")
+        time.sleep(3)
+        
+    log.warning("[RS] โหลด SPY ไม่สำเร็จเลย — ปิดการคำนวณ RS")
+    _spy_df_cache = pd.DataFrame()
     return _spy_df_cache
 
 
@@ -271,12 +275,23 @@ def score_stock(df: pd.DataFrame, rsi_low: int = RSI_LOW, rsi_high: int = RSI_HI
     spy_df     = _get_spy_df()
     if not spy_df.empty and len(spy_df) >= RS_PERIOD and len(close) >= RS_PERIOD:
         try:
-            stock_ret = (float(close.iloc[-1]) / float(close.iloc[-RS_PERIOD]) - 1) * 100
-            spy_ret   = (float(spy_df["Close"].iloc[-1]) / float(spy_df["Close"].iloc[-RS_PERIOD]) - 1) * 100
+            stock_p1 = close.iloc[-1]
+            stock_p0 = close.iloc[-RS_PERIOD]
+            spy_c    = spy_df["Close"]
+            spy_p1   = spy_c.iloc[-1]
+            spy_p0   = spy_c.iloc[-RS_PERIOD]
+
+            stock_p1 = float(stock_p1.iloc[0] if hasattr(stock_p1, 'iloc') else stock_p1)
+            stock_p0 = float(stock_p0.iloc[0] if hasattr(stock_p0, 'iloc') else stock_p0)
+            spy_p1   = float(spy_p1.iloc[0] if hasattr(spy_p1, 'iloc') else spy_p1)
+            spy_p0   = float(spy_p0.iloc[0] if hasattr(spy_p0, 'iloc') else spy_p0)
+
+            stock_ret = (stock_p1 / stock_p0 - 1) * 100
+            spy_ret   = (spy_p1 / spy_p0 - 1) * 100
             rs_vs_spy = round(stock_ret - spy_ret, 2)
             rs_bonus  = 1 if rs_vs_spy > 0 else 0
-        except Exception:
-            pass
+        except Exception as e:
+            log.debug(f"[RS Error] {e}")
 
     details["rs_vs_spy"] = rs_vs_spy
     details["rs_bonus"]  = rs_bonus
