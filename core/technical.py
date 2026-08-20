@@ -21,7 +21,9 @@ def _get_spy_df() -> pd.DataFrame:
         try:
             df = yf.download("SPY", period="1y", interval="1d",
                              auto_adjust=True, progress=False, threads=False)
-            if df is not None and len(df) >= RS_PERIOD:
+            if df is not None and not df.empty and len(df) >= RS_PERIOD:
+                if hasattr(df.columns, 'levels'):
+                    df.columns = df.columns.get_level_values(0)
                 _spy_df_cache = df
                 log.info(f"[RS] โหลด SPY สำเร็จ: {len(df)} วัน")
                 return _spy_df_cache

@@ -42,6 +42,8 @@ def detect_market_regime() -> dict:
                 auto_adjust=True, progress=False, threads=False,
             )
             if df is not None and not df.empty and len(df) >= 210:
+                if hasattr(df.columns, 'levels'):
+                    df.columns = df.columns.get_level_values(0)
                 break
         except Exception as e:
             log.debug(f"[Market Regime] SPY attempt {attempt+1} failed: {e}")
