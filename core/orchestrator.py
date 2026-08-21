@@ -178,7 +178,7 @@ def run_scan():
         sent_pct = f'{confidence*100:.0f}%'
         timing   = stock.get('timing_signal', '')
         summary_rows += (
-            f'{medal} <b></b>  '
+            f'{medal} <b>${stock["ticker"]}</b>  '
             f'Tech:{stock["score"]}/10  Sentiment:{sent_pct}  {timing}\n'
             f'    RSI {stock["rsi"]} | ADX {stock["adx"]} | '
             f'RS vs SPY {stock.get("rs_vs_spy", 0):+.1f}%\n'

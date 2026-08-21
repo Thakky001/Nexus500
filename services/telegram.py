@@ -74,7 +74,7 @@ def build_message(stock: dict, headlines: list, confidence: float, rank: int = 0
     n_analysts  = stock.get('num_analysts', 0)
     analyst_line = (
         f'  • Rating: {analyst_rec.upper()} ({n_analysts} Analysts)\n'
-        f'  • Target Price:  (Upside {upside:+.1f}%)\n'
+        f'  • Target Price: ${target_p} (Upside {upside:+.1f}%)\n'
         if target_p > 0 else '  • ไม่มีข้อมูล Analyst\n'
     )
 
@@ -96,12 +96,11 @@ def build_message(stock: dict, headlines: list, confidence: float, rank: int = 0
     insider_summary = stock.get('insider_summary', 'ไม่มีข้อมูล Insider')
 
     return (
-        f'📈 <b></b>  {badge} (Long-term)\n'
+        f'📈 <b>${t}</b>  {badge} (Long-term)\n'
         f'<code>{bar}</code>\n'
         f'━━━━━━━━━━━━━━━━━━━━━━━━\n'
-        f'💲 <b>ราคาปัจจุบัน</b>  \n'
-        f'📊 <b>EMA 20/50/200</b>  '
-        f' /  / \n'
+        f'💲 <b>ราคาปัจจุบัน</b>  ${stock.get("price", 0)}\n'
+        f'📊 <b>EMA 20/50/200</b>  ${stock.get("ema20", 0)} / ${stock.get("ema50", 0)} / ${stock.get("ema200", 0)}\n'
         f'━━━━━━━━━━━━━━━━━━━━━━━━\n'
         f'🚦 <b>Timing Signal:</b> {timing}\n'
         f'   ห่าง EMA20: {stock.get("pct_above_ema20", 0):+.1f}% | RS vs SPY: {stock.get("rs_vs_spy", 0):+.1f}%\n'
