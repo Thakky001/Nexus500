@@ -77,7 +77,7 @@ def detect_market_regime() -> dict:
             regime = 'bear'
             adj_score = REGIME_BEAR_MIN_SCORE
             rsi_range = REGIME_BEAR_RSI
-            label = f'🔴 Bear (SPY ${price:.1f} < EMA200 ${e200:.1f})'
+            label = f'🔴 Bear (SPY ${price:.1f} ต่ำกว่า EMA200 ${e200:.1f})'
         elif pct_vs_e200 < 2.0 or rsi_val < 40:
             # SPY อยู่ใกล้ EMA200 หรือ RSI ต่ำ = ระวัง
             regime = 'caution'
@@ -88,7 +88,7 @@ def detect_market_regime() -> dict:
             regime = 'bull'
             adj_score = REGIME_BULL_MIN_SCORE
             rsi_range = REGIME_BULL_RSI
-            label = f'🟢 Bull (SPY ${price:.1f} > EMA200 ${e200:.1f} | RSI {rsi_val:.0f})'
+            label = f'🟢 Bull (SPY ${price:.1f} สูงกว่า EMA200 ${e200:.1f} | RSI {rsi_val:.0f})'
 
         log.info(f'[Market Regime] {label} → MIN_SCORE = {adj_score}')
 

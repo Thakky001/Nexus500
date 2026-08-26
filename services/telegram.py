@@ -1,4 +1,5 @@
 import requests
+import html
 from config import *
 from logger import log
 
@@ -13,8 +14,11 @@ def send_telegram(message: str) -> bool:
         resp = requests.post(url, json=payload, timeout=10)
         resp.raise_for_status()
         return True
-    except Exception as e:
-        log.error(f'ส่ง Telegram ล้มเหลว: {e}')
+    except requests.exceptions.RequestException as e:
+        err_msg = f'ส่ง Telegram ล้มเหลว: {e}'
+        if e.response is not None:
+            err_msg += f' | {e.response.text}'
+        log.error(err_msg)
         return False
 
 
@@ -50,7 +54,7 @@ def build_message(stock: dict, headlines: list, confidence: float, rank: int = 0
     if stock.get('rs_vs_spy', 0) > 0: bonuses.append(f'📈 RS vs SPY {stock["rs_vs_spy"]:+.1f}%')
     bonus_line = '  '.join(bonuses) if bonuses else '—'
 
-    news_lines = ''.join(f'  {i}. {h}\n' for i, h in enumerate(headlines, 1))
+    news_lines = ''.join(f'  {i}. {html.escape(h)}\n' for i, h in enumerate(headlines, 1))
     conf_pct   = f'{confidence*100:.0f}%'
 
     val_score    = stock.get('valuation_score', 0)
@@ -68,7 +72,7 @@ def build_message(stock: dict, headlines: list, confidence: float, rank: int = 0
     timing = stock.get('timing_signal', '—')
 
     # -- Analyst Section ---------------------------------------------------------
-    analyst_rec = stock.get('analyst_rec', 'none')
+    analyst_rec = html.escape(stock.get('analyst_rec', 'none'))
     target_p    = stock.get('target_price', 0)
     upside      = stock.get('upside_pct', 0)
     n_analysts  = stock.get('num_analysts', 0)
@@ -79,7 +83,7 @@ def build_message(stock: dict, headlines: list, confidence: float, rank: int = 0
     )
 
     # -- Earnings Warning --------------------------------------------------------
-    earn_warn = stock.get('earnings_warning', '')
+    earn_warn = html.escape(stock.get('earnings_warning', ''))
     earn_line = f'\n{earn_warn}\n' if earn_warn else ''
 
     # -- Earnings Quality --------------------------------------------------------
@@ -93,8 +97,11 @@ def build_message(stock: dict, headlines: list, confidence: float, rank: int = 0
     )
 
     # -- Insider Activity --------------------------------------------------------
-    insider_summary = stock.get('insider_summary', 'ไม่มีข้อมูล Insider')
+    insider_summary = html.escape(stock.get('insider_summary', 'ไม่มีข้อมูล Insider'))
 
+    # -- Sector Money Flow -------------------------------------------------------
+    sector_name = html.escape(stock.get("sector", "Unknown"))
+    
     return (
         f'📈 <b>${t}</b>  {badge} (Long-term)\n'
         f'<code>{bar}</code>\n'
@@ -126,7 +133,7 @@ def build_message(stock: dict, headlines: list, confidence: float, rank: int = 0
         f'{streak_line}'
         f'━━━━━━━━━━━━━━━━━━━━━━━━\n'
         f'💹 <b>Sector Money Flow (1M)</b>\n'
-        f'  • {stock.get("sector", "Unknown")}: {stock.get("sector_flow", 0.0):+.1f}%\n'
+        f'  • {sector_name}: {stock.get("sector_flow", 0.0):+.1f}%\n'
         f'━━━━━━━━━━━━━━━━━━━━━━━━\n'
         f'🔢 <b>Technical Stats</b>\n'
         f'  • RSI(14): {stock["rsi"]} | MACD Hist: {stock["macd_hist"]:+.4f}\n'
