@@ -115,11 +115,10 @@ def score_stock(df: pd.DataFrame, rsi_low: int = RSI_LOW, rsi_high: int = RSI_HI
     score   = 0
     details = {}
 
-    close  = df["Close"]
-    high   = df["High"]
-    low    = df["Low"]
-    volume = df["Volume"]
-    last   = df.iloc[-1]
+    close  = df["Close"].squeeze()
+    high   = df["High"].squeeze()
+    low    = df["Low"].squeeze()
+    volume = df["Volume"].squeeze()
 
     ema20    = ta.ema(close, length=20)
     ema50    = ta.ema(close, length=50)
@@ -128,13 +127,13 @@ def score_stock(df: pd.DataFrame, rsi_low: int = RSI_LOW, rsi_high: int = RSI_HI
     macd_df  = ta.macd(close, fast=12, slow=26, signal=9)
     adx_df   = ta.adx(high, low, close, length=14)
 
-    price      = float(last["Close"])
+    price      = float(close.iloc[-1])
     e20        = float(ema20.iloc[-1])
     e50        = float(ema50.iloc[-1])
     e200       = float(ema200.iloc[-1])
     rsi_val    = float(rsi.iloc[-1])
     avg_vol_20 = float(volume.tail(20).mean())
-    today_vol  = float(last["Volume"])
+    today_vol  = float(volume.iloc[-1])
     high_52w   = float(high.tail(252).max())
     price_5d   = float(close.iloc[-6])
 

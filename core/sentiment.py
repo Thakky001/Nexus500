@@ -1,5 +1,6 @@
 import time
 import requests
+import xml.etree.ElementTree as ET
 from config import (
     HF_API_TOKEN, HF_MODEL_URL, AI_RETRY_WAIT,
     MAX_NEWS_YAHOO, MAX_NEWS_GOOGLE, MAX_NEWS_TOTAL,
@@ -12,10 +13,9 @@ def fetch_yahoo_news(ticker: str, max_items: int = MAX_NEWS_YAHOO) -> list:
     url = f"https://feeds.finance.yahoo.com/rss/2.0/headline?s={ticker}&region=US&lang=en-US"
     headlines = []
     try:
-        resp = requests.get(url, timeout=10, headers={"User-Agent": "Mozilla/5.0"})
+        resp = requests.get(url, timeout=10, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
         resp.raise_for_status()
-        from lxml import etree
-        root  = etree.fromstring(resp.content)
+        root  = ET.fromstring(resp.content)
         items = root.findall(".//item")
         for item in items[:max_items]:
             title = item.findtext("title", "").strip()
@@ -32,20 +32,19 @@ def fetch_google_news(ticker: str, max_items: int = MAX_NEWS_GOOGLE) -> list:
     """ดึงข่าวจาก Google News RSS (แหล่งเสริม ไม่ต้อง API key)"""
     url = (
         f"https://news.google.com/rss/search"
-        f"?q={ticker}+stock+NYSE+NASDAQ&hl=en-US&gl=US&ceid=US:en"
+        f"?q={ticker}+stock+finance&hl=en-US&gl=US&ceid=US:en"
     )
     headlines = []
     try:
-        resp = requests.get(url, timeout=10, headers={"User-Agent": "Mozilla/5.0"})
+        resp = requests.get(url, timeout=10, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
         resp.raise_for_status()
-        from lxml import etree
-        root  = etree.fromstring(resp.content)
+        root  = ET.fromstring(resp.content)
         items = root.findall(".//item")
-        for item in items[:max_items * 2]:  # ดึงมามากขึ้นหน่อยเพื่อ filter ได้มากขึ้น
+        for item in items:
             title = item.findtext("title", "").strip()
-            # filter เฟ้นข่าวที่เกี่ยวข้องกับ Ticker
-            if title and ticker.upper() in title.upper():
-                headlines.append(title)
+            if title:
+                clean_title = title.split(" - ")[0] if " - " in title else title
+                headlines.append(clean_title)
                 if len(headlines) >= max_items:
                     break
     except Exception as e:
