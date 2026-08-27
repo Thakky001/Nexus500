@@ -1,10 +1,14 @@
 import time
 import requests
-from config import *
+from config import (
+    HF_API_TOKEN, HF_MODEL_URL, AI_RETRY_WAIT,
+    MAX_NEWS_YAHOO, MAX_NEWS_GOOGLE, MAX_NEWS_TOTAL,
+)
 from logger import log
 
 # ══════════════════════════════════════════════
-def fetch_news(ticker: str, max_items: int = 8) -> list:
+def fetch_yahoo_news(ticker: str, max_items: int = MAX_NEWS_YAHOO) -> list:
+    """ดึงข่าวจาก Yahoo Finance RSS (แหล่งหลัก)"""
     url = f"https://feeds.finance.yahoo.com/rss/2.0/headline?s={ticker}&region=US&lang=en-US"
     headlines = []
     try:
@@ -20,8 +24,58 @@ def fetch_news(ticker: str, max_items: int = 8) -> list:
                 full_text = f"{title}. {desc}" if desc else title
                 headlines.append(full_text)
     except Exception as e:
-        log.debug(f"ดึงข่าว {ticker} ล้มเหลว: {e}")
+        log.debug(f"ดึงข่าว Yahoo {ticker} ล้มเหลว: {e}")
     return headlines
+
+
+def fetch_google_news(ticker: str, max_items: int = MAX_NEWS_GOOGLE) -> list:
+    """ดึงข่าวจาก Google News RSS (แหล่งเสริม ไม่ต้อง API key)"""
+    url = (
+        f"https://news.google.com/rss/search"
+        f"?q={ticker}+stock+NYSE+NASDAQ&hl=en-US&gl=US&ceid=US:en"
+    )
+    headlines = []
+    try:
+        resp = requests.get(url, timeout=10, headers={"User-Agent": "Mozilla/5.0"})
+        resp.raise_for_status()
+        from lxml import etree
+        root  = etree.fromstring(resp.content)
+        items = root.findall(".//item")
+        for item in items[:max_items * 2]:  # ดึงมามากขึ้นหน่อยเพื่อ filter ได้มากขึ้น
+            title = item.findtext("title", "").strip()
+            # filter เฟ้นข่าวที่เกี่ยวข้องกับ Ticker
+            if title and ticker.upper() in title.upper():
+                headlines.append(title)
+                if len(headlines) >= max_items:
+                    break
+    except Exception as e:
+        log.debug(f"ดึงข่าว Google {ticker} ล้มเหลว: {e}")
+    return headlines
+
+
+def fetch_news(ticker: str) -> list:
+    """
+    ดึงข่าวจากทุกแหล่ง (Yahoo + Google) และตัดข่าวซ้ำออก
+    คืน list ของ headlines ไม่เกิน MAX_NEWS_TOTAL รายการ
+    """
+    # ── Yahoo Finance (แหล่งหลัก) ──────────────────────────────
+    headlines = fetch_yahoo_news(ticker, max_items=MAX_NEWS_YAHOO)
+
+    # ── Google News (แหล่งเสริม) ────────────────────────────
+    google_headlines = fetch_google_news(ticker, max_items=MAX_NEWS_GOOGLE)
+
+    # Deduplicate: ตัดข่าวซ้ำโดยเปรียบ prefix 60 ตัวอักษรแรก
+    existing_prefixes = {h.lower()[:60] for h in headlines}
+    for gh in google_headlines:
+        prefix = gh.lower()[:60]
+        if prefix not in existing_prefixes:
+            headlines.append(gh)
+            existing_prefixes.add(prefix)
+
+    combined = headlines[:MAX_NEWS_TOTAL]
+    log.debug(f"[News] {ticker}: Yahoo={len(fetch_yahoo_news.__defaults__ or [])}, "
+              f"Google={len(google_headlines)}, Total={len(combined)}")
+    return combined
 
 
 # ══════════════════════════════════════════════

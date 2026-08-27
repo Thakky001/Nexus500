@@ -1,4 +1,4 @@
-from flask import Flask, jsonify, render_template
+from flask import Flask, jsonify, render_template, request
 import threading
 import os
 
@@ -62,9 +62,35 @@ def trigger():
 def health():
     sheet_ok = bool(GOOGLE_SHEET_ID and GOOGLE_SERVICE_ACCOUNT_JSON)
     return jsonify({
-        "status":       "healthy",
+        "status":        "healthy",
         "google_sheets": "configured" if sheet_ok else "not configured",
+        "config": {
+            "max_position_pct":  MAX_POSITION_PCT,
+            "sentiment_mode":    "score_adjustment",
+            "macro_indicators":  True,
+            "news_sources":      ["Yahoo Finance", "Google News"],
+            "weighted_scoring":  True,
+        },
     })
+
+
+@app.route("/backtest")
+def backtest():
+    """
+    Backtesting endpoint — วิเคราะห์ประสิทธิภาพ Signal ย้อนหลัง
+    Query params:
+      days  : int  จำนวนวันย้อนหลัง (default 90)
+    Example: /backtest?days=180
+    """
+    days = request.args.get('days', 90, type=int)
+    days = max(7, min(days, 365))  # คุม range ไว้  7–365 วัน
+    try:
+        from core.backtest import backtest_signals
+        result = backtest_signals(lookback_days=days)
+        return jsonify({"status": "ok", **result})
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
 
 
 # ══════════════════════════════════════════════

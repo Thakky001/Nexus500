@@ -91,11 +91,16 @@ def save_to_sheet(results: list, scan_date: str, market_regime: str = "bull"):
 
     rows = []
     for rank, item in enumerate(results, 1):
-        if len(item) == 5:
+        # รองรับทั้ง tuple 5 ตัว (เก่า) และ 6 ตัว (ใหม่ มี sent_label)
+        if len(item) == 6:
+            stock, headlines, confidence, composite, sent_bk, sent_label = item
+        elif len(item) == 5:
             stock, headlines, confidence, composite, sent_bk = item
+            sent_label = 'positive'  # backward-compat
         else:
             stock, headlines, confidence, composite = item
             sent_bk = {"positive": 0, "negative": 0, "neutral": 0}
+            sent_label = 'positive'
 
         rows.append([
             scan_date,
@@ -113,7 +118,7 @@ def save_to_sheet(results: list, scan_date: str, market_regime: str = "bull"):
             stock.get("avg_vol", ""),
             stock.get("vol_surge", ""),
             stock.get("score", ""),
-            "positive",
+            sent_label,          # บันทึก sentiment label ที่แท้จริง (positive/neutral/negative)
             round(confidence, 4),
             round(composite, 4),
             stock.get("entry_current", ""),
@@ -235,3 +240,50 @@ def get_ticker_streak(ticker: str, lookback_days: int = 30) -> int:
     except Exception as e:
         log.debug(f"[Streak] ดึงข้อมูล {ticker} ล้มเหลว: {e}")
         return 0
+
+
+# ══════════════════════════════════════════════
+#  Backtesting Support — ดึงประวัติรายละเอียดย้อนหลัง
+# ══════════════════════════════════════════════
+
+def get_scan_history(days: int = 90) -> list:
+    """
+    ดึงประวัติ Signal ย้อนหลังจาก Google Sheets สำหรับ Backtesting Engine
+
+    Parameters
+    ----------
+    days : int
+        จำนวนวันย้อนหลัง (default 90)
+
+    Returns
+    -------
+    list of dict พร้อม fields: ticker, date, price, stop_loss, take_profit,
+                                     composite, sentiment, rank
+    """
+    ws = get_gsheet()
+    if ws is None:
+        log.warning("[ScanHistory] Google Sheets ไม่ได้ตั้งค่า")
+        return []
+    try:
+        from datetime import datetime, timezone, timedelta
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d")
+        all_rows = ws.get_all_records()
+        history  = []
+        for row in all_rows:
+            row_date = str(row.get("date", ""))
+            if row_date >= cutoff:
+                history.append({
+                    'ticker':     str(row.get('ticker', '')),
+                    'date':       row_date,
+                    'price':      row.get('price') or row.get('entry_current'),
+                    'stop_loss':  row.get('stop_loss'),
+                    'take_profit':row.get('take_profit'),
+                    'composite':  row.get('composite'),
+                    'sentiment':  row.get('sentiment', 'positive'),
+                    'rank':       row.get('rank'),
+                })
+        log.info(f"[ScanHistory] ดึง {len(history)} Signal (ย้อนหลัง {days} วัน)")
+        return history
+    except Exception as e:
+        log.error(f"[ScanHistory] ดึงข้อมูลล้มเหลว: {e}")
+        return []

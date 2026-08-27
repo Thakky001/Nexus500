@@ -261,15 +261,31 @@ def score_stock(df: pd.DataFrame, rsi_low: int = RSI_LOW, rsi_high: int = RSI_HI
     # ── Timing Signal ──────────────────────────────────────────────────────
     pct_above_ema20 = ((price - e20) / e20 * 100) if e20 > 0 else 0.0
 
-    if rsi_val <= TIMING_BUY_RSI_MAX and pct_above_ema20 <= TIMING_BUY_PCT_EMA20_MAX:
-        timing = "🟢 BUY NOW"     # ราคาใกล้ EMA20 Support + RSI ไม่สูง
-    elif rsi_val >= TIMING_EXT_RSI_MIN or pct_above_ema20 >= TIMING_EXT_PCT_EMA20_MIN:
-        timing = "🔴 EXTENDED"    # RSI สูงเกินหรือราคาห่าง EMA20 มาก
-    else:
-        timing = "🟡 WAIT"        # หุ้นดีแต่ยังไม่ย่อพอ
+    # ── Fibonacci Proximity Check ─────────────────────────────────────────
+    # ตรวจว่าราคาปัจจุบันอยู่ใกล้ Fib Support level ใดๆ ภายใน FIB_PROXIMITY_PCT%
+    near_fib_support = False
+    fib_levels_to_check = [entry_zone_1, entry_zone_2, entry_zone_3]
+    for fib_price in fib_levels_to_check:
+        if fib_price > 0 and abs(price - fib_price) / price * 100 <= FIB_PROXIMITY_PCT:
+            near_fib_support = True
+            break
 
-    details["timing_signal"]   = timing
-    details["pct_above_ema20"] = round(pct_above_ema20, 2)
+    if rsi_val <= TIMING_BUY_RSI_MAX and pct_above_ema20 <= TIMING_BUY_PCT_EMA20_MAX:
+        if near_fib_support:
+            timing = "🟢 STRONG BUY (Fib Support)"  # ใกล้ Fib + RSI ต่ำ + ใกล้ EMA20
+        else:
+            timing = "🟢 BUY NOW"                    # ราคาใกล้ EMA20 Support + RSI ไม่สูง
+    elif rsi_val >= TIMING_EXT_RSI_MIN or pct_above_ema20 >= TIMING_EXT_PCT_EMA20_MIN:
+        timing = "🔴 EXTENDED"                        # RSI สูงเกินหรือราคาห่าง EMA20 มาก
+    else:
+        if near_fib_support:
+            timing = "🟡 WATCH (Near Fib Support)"   # ยังไม่ BUY แต่ราคาใกล้แนวรับ Fib
+        else:
+            timing = "🟡 WAIT"                        # หุ้นดีแต่ยังไม่ย่อพอ
+
+    details["timing_signal"]    = timing
+    details["pct_above_ema20"]  = round(pct_above_ema20, 2)
+    details["near_fib_support"] = near_fib_support
 
     # ── Relative Strength vs SPY ───────────────────────────────────────────
     rs_vs_spy  = 0.0

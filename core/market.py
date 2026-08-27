@@ -1,10 +1,76 @@
+import time
 import yfinance as yf
 import pandas_ta_classic as ta
 from config import (
     REGIME_BULL_MIN_SCORE, REGIME_CAUTION_MIN_SCORE, REGIME_BEAR_MIN_SCORE,
-    REGIME_BULL_RSI, REGIME_CAUTION_RSI, REGIME_BEAR_RSI
+    REGIME_BULL_RSI, REGIME_CAUTION_RSI, REGIME_BEAR_RSI,
+    VIX_CAUTION_LEVEL, VIX_FEAR_LEVEL, YIELD_10Y_TICKER, DOLLAR_TICKER,
+    MACRO_PENALTY_MAX,
 )
 from logger import log
+
+
+def fetch_macro_indicators() -> dict:
+    """
+    ดึง VIX, 10Y Treasury Yield, Dollar Index (DXY)
+    เพื่อประเมินสภาพแวดล้อม Macro
+
+    Return dict:
+      vix       : float | None
+      yield_10y : float | None
+      dollar_idx: float | None
+      macro_warning: list[str]
+      macro_adj     : int  (เพิ่ม MIN_SCORE ตาม VIX)
+    """
+    result = {
+        'vix': None,
+        'yield_10y': None,
+        'dollar_idx': None,
+        'macro_warning': [],
+        'macro_adj': 0,
+    }
+
+    indicators = [
+        ("^VIX",          "vix"),
+        (YIELD_10Y_TICKER, "yield_10y"),
+        (DOLLAR_TICKER,    "dollar_idx"),
+    ]
+
+    for ticker, key in indicators:
+        for attempt in range(2):
+            try:
+                df = yf.download(
+                    ticker, period="5d", interval="1d",
+                    auto_adjust=True, progress=False, threads=False,
+                )
+                if df is not None and not df.empty:
+                    val = df['Close'].iloc[-1]
+                    val = float(val.iloc[0] if hasattr(val, 'iloc') else val)
+                    result[key] = round(val, 2)
+                break
+            except Exception as e:
+                log.debug(f"[Macro] ดึง {ticker} ล้มเหลว (attempt {attempt+1}): {e}")
+                time.sleep(3)
+
+    # ── ประเมิน VIX และสร้าง warnings + penalty ─────────────────
+    vix = result.get('vix')
+    if vix is not None:
+        if vix >= VIX_FEAR_LEVEL:
+            result['macro_warning'].append(f"⚠️ VIX {vix:.1f} — ตลาดตื่นตระหนก (Fear Level)")
+            result['macro_adj'] = min(result['macro_adj'] + 2, MACRO_PENALTY_MAX)
+        elif vix >= VIX_CAUTION_LEVEL:
+            result['macro_warning'].append(f"🟡 VIX {vix:.1f} — ตลาดเริ่มกลัว (Caution Level)")
+            result['macro_adj'] = min(result['macro_adj'] + 1, MACRO_PENALTY_MAX)
+
+    yield_10y = result.get('yield_10y')
+    if yield_10y is not None and yield_10y >= 4.5:
+        result['macro_warning'].append(f"📈 10Y Yield {yield_10y:.2f}% — Bond Yield สูง กดดัน Growth Stocks")
+
+    log.info(
+        f"[Macro] VIX={result['vix']} | 10Y={result['yield_10y']}% "
+        f"| DXY={result['dollar_idx']} | adj=+{result['macro_adj']}"
+    )
+    return result
 
 
 def detect_market_regime() -> dict:
@@ -90,7 +156,17 @@ def detect_market_regime() -> dict:
             rsi_range = REGIME_BULL_RSI
             label = f'🟢 Bull (SPY ${price:.1f} สูงกว่า EMA200 ${e200:.1f} | RSI {rsi_val:.0f})'
 
-        log.info(f'[Market Regime] {label} → MIN_SCORE = {adj_score}')
+        log.info(f'[Market Regime] {label} → MIN_SCORE = {adj_score} (before macro)')
+
+        # ── Macro Indicators: VIX, 10Y Yield, Dollar Index ────────────────
+        macro = fetch_macro_indicators()
+        adj_score = min(adj_score + macro['macro_adj'], 10)  # Cap ที่ 10
+
+        if macro['macro_adj'] > 0:
+            log.info(
+                f'[Market Regime] Macro Penalty +{macro["macro_adj"]} → '
+                f'MIN_SCORE = {adj_score}'
+            )
 
         return {
             'regime': regime,
@@ -101,6 +177,7 @@ def detect_market_regime() -> dict:
             'spy_5d_return': round(ret_5d, 2),
             'label': label,
             'rsi_range': rsi_range,
+            'macro': macro,
         }
 
     except Exception as e:
