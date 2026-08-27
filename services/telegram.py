@@ -161,7 +161,7 @@ def build_message(stock: dict, headlines: list, confidence: float, rank: int = 0
         f'━━━━━━━━━━━━━━━━━━━━━━━━\n'
         f'📰 <b>ข่าว (🟢 Positive {conf_pct})</b>\n'
         f'  📊 Breakdown: {sent_breakdown.get("positive", 0)} Pos | {sent_breakdown.get("negative", 0)} Neg | {sent_breakdown.get("neutral", 0)} Neu\n'
-        f'{news_lines}'
+        f'  <i>(ดูรายละเอียดข่าวได้ในหน้าเว็บ Dashboard)</i>\n'
         f'━━━━━━━━━━━━━━━━━━━━━━━━\n'
         f'⭐ <b>Composite Score</b>: {composite:.2f}  \n'
         f'<i>(Tech {s}/11 + Val {val_score}/3 + Analyst {analyst_sc}/3 + Quality {quality_sc}/2 + Insider {insider_sc} + Streak {streak_bonus} + Flow {stock.get("sector_flow_score", 0)} + Sent {conf_pct})</i>\n'
